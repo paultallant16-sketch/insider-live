@@ -28,7 +28,7 @@ EVM = {
                       rpcs=['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.drpc.org']),
     'Ethereum':  dict(gt='eth', block_s=12.0, max_range=500, back=150,
                       rpcs=['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org', 'https://eth.llamarpc.com']),
-    'Robinhood': dict(gt='robinhood', block_s=0.25, max_range=5000, back=7200,
+    'Robinhood': dict(gt='robinhood', block_s=0.106, max_range=10000, back=12000,
                       rpcs=['https://rpc.mainnet.chain.robinhood.com', 'https://rpc.nodeflare.app/robinhood/public']),
 }
 SOL_RPCS = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
@@ -176,7 +176,7 @@ def topic(addr):
     return '0x' + '0' * 24 + addr.lower()[2:]
 
 
-def scan_evm(chain, cfg, wallets, st, newmoves):
+def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
     if not wallets:
         return
     rpc = RPC(chain, cfg['rpcs'], gap=0.12)
@@ -209,7 +209,12 @@ def scan_evm(chain, cfg, wallets, st, newmoves):
             for i in range(0, len(tops), groups_of):
                 part = tops[i:i + groups_of]
                 for flt in ([TRANSFER, None, part], [TRANSFER, part]):
-                    got += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e), 'topics': flt}]) or []
+                    q = {'fromBlock': hex(b), 'toBlock': hex(e), 'topics': flt}
+                    if contracts is None:
+                        got += rpc.call('eth_getLogs', [q]) or []
+                    else:
+                        for j in range(0, len(contracts), 80):
+                            got += rpc.call('eth_getLogs', [dict(q, address=contracts[j:j + 80])]) or []
             logs += got
             cur['last'] = e
             b = e + 1
@@ -262,6 +267,79 @@ def scan_evm(chain, cfg, wallets, st, newmoves):
             continue
         newmoves.append(dict(chain=chain, wallet=w, ts=ts, side=side, ca=tok, raw=str(raw),
                              tx=l['transactionHash'], cp=frm if side == 'buy' else to))
+
+
+# ---------------------------------------------------------------- Blockscout (per wallet, no key)
+BLOCKSCOUT = {'Base': 'https://base.blockscout.com', 'Ethereum': 'https://eth.blockscout.com'}
+
+
+def scan_blockscout(chain, wallets, st, newmoves):
+    host = BLOCKSCOUT[chain]
+    cur = st.setdefault('bs', {}).setdefault(chain, {})
+    last = cur.setdefault('last', {})
+    wset = set(wallets)
+    done = 0
+    for w in sorted(wallets):
+        if left() < 90:
+            break
+        try:
+            r = http(f'{host}/api/v2/addresses/{w}/token-transfers?type=ERC-20', timeout=20)
+        except Exception as e:
+            ERRORS.append(f'{chain} blockscout: {type(e).__name__}')
+            time.sleep(1)
+            continue
+        done += 1
+        since = last.get(w, NOW - 3 * 3600)
+        newest = since
+        for it in (r or {}).get('items', []):
+            try:
+                ts = int(dt.datetime.fromisoformat(it['timestamp'].replace('Z', '+00:00')).timestamp())
+            except Exception:
+                continue
+            if ts <= since:
+                continue
+            newest = max(newest, ts)
+            frm = ((it.get('from') or {}).get('hash') or '').lower()
+            to = ((it.get('to') or {}).get('hash') or '').lower()
+            t = it.get('token') or {}
+            tok = (t.get('address') or t.get('address_hash') or '').lower()
+            raw = (it.get('total') or {}).get('value') or '0'
+            if frm in wset and to in wset:
+                side, ww = 'internal', to
+            elif to == w:
+                side, ww = 'buy', w
+            elif frm == w:
+                side, ww = 'sell', w
+            else:
+                continue
+            newmoves.append(dict(chain=chain, wallet=ww, ts=ts, side=side, ca=tok, raw=str(raw),
+                                 tx=it.get('transaction_hash') or it.get('tx_hash') or ''))
+        last[w] = newest
+        time.sleep(0.25)
+    cur['covered'] = done
+    cur['of'] = len(wallets)
+    cur['at'] = NOW
+
+
+def bsc_contracts(st, moves):
+    """BSC public nodes only answer log queries scoped to token contracts, so watch trending and new
+    BSC tokens plus every token our teams touched in the last 7 days."""
+    cas = []
+    for path in ('/networks/bsc/trending_pools?duration=5m&page=1', '/networks/bsc/trending_pools?duration=1h&page=1',
+                 '/networks/bsc/trending_pools?duration=6h&page=1', '/networks/bsc/new_pools?page=1',
+                 '/networks/bsc/new_pools?page=2', '/networks/bsc/new_pools?page=3'):
+        if left() < 200:
+            break
+        r = GT.get(path)
+        for p in (r or {}).get('data', []):
+            base = (p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
+            if base:
+                cas.append(base.split('_', 1)[-1].lower())
+    cas += [m['ca'] for m in moves if m['chain'] == 'BSC']
+    cas += st.get('bsc_contracts', [])[:150]
+    cas = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:400]
+    st['bsc_contracts'] = cas
+    return cas
 
 
 # ---------------------------------------------------------------- Solana
@@ -423,6 +501,11 @@ def main():
         try:
             if chain == 'Solana':
                 scan_solana(list(watch.get('Solana', {})), st, newmoves)
+            elif chain in BLOCKSCOUT:
+                scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
+            elif chain == 'BSC':
+                scan_evm(chain, EVM[chain], [w.lower() for w in watch.get(chain, {})], st, newmoves,
+                         contracts=bsc_contracts(st, moves))
             else:
                 scan_evm(chain, EVM[chain], [w.lower() for w in watch.get(chain, {})], st, newmoves)
         except Exception as e:
@@ -565,7 +648,8 @@ def main():
     runs.insert(0, dict(at=NOW, secs=int(time.time() - T0), new_moves=sum(1 for m in moves if m.get('new') == NOW),
                         gt_calls=GT.calls, errors=ERRORS[:8]))
     meta = dict(updated=NOW, updated_utc=utc(NOW), runs=runs[:48],
-                chains={c: dict(st.get('evm', {}).get(c, {}), wallets=len(watch.get(c, {}))) for c in EVM},
+                chains={c: dict(st.get('evm', {}).get(c, {}), **{k: v for k, v in st.get('bs', {}).get(c, {}).items()
+                                                                 if k != 'last'}, wallets=len(watch.get(c, {}))) for c in EVM},
                 solana=dict({k: v for k, v in st.get('sol', {}).items() if k != 'last'},
                             wallets=len(watch.get('Solana', {}))))
     save(os.path.join(OUT, 'moves.json'), dict(updated=NOW, rows=moves))
