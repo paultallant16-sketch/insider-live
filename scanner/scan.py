@@ -213,8 +213,8 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
                     if contracts is None:
                         got += rpc.call('eth_getLogs', [q]) or []
                     else:
-                        for j in range(0, len(contracts), 80):
-                            got += rpc.call('eth_getLogs', [dict(q, address=contracts[j:j + 80])]) or []
+                        for j in range(0, len(contracts), 10):
+                            got += rpc.call('eth_getLogs', [dict(q, address=contracts[j:j + 10])]) or []
             logs += got
             cur['last'] = e
             b = e + 1
@@ -283,9 +283,15 @@ def scan_blockscout(chain, wallets, st, newmoves):
         if left() < 90:
             break
         try:
-            r = http(f'{host}/api/v2/addresses/{w}/token-transfers?type=ERC-20', timeout=20)
+            try:
+                r = http(f'{host}/api/v2/addresses/{w}/token-transfers?type=ERC-20', timeout=20)
+            except urllib.error.HTTPError as e1:
+                if e1.code != 429:
+                    raise
+                time.sleep(5)
+                r = http(f'{host}/api/v2/addresses/{w}/token-transfers?type=ERC-20', timeout=20)
         except Exception as e:
-            ERRORS.append(f'{chain} blockscout: {type(e).__name__}')
+            ERRORS.append(f'{chain} blockscout: {getattr(e, "code", type(e).__name__)}')
             time.sleep(1)
             continue
         done += 1
@@ -315,7 +321,7 @@ def scan_blockscout(chain, wallets, st, newmoves):
             newmoves.append(dict(chain=chain, wallet=ww, ts=ts, side=side, ca=tok, raw=str(raw),
                                  tx=it.get('transaction_hash') or it.get('tx_hash') or ''))
         last[w] = newest
-        time.sleep(0.25)
+        time.sleep(1.0)
     cur['covered'] = done
     cur['of'] = len(wallets)
     cur['at'] = NOW
@@ -335,9 +341,8 @@ def bsc_contracts(st, moves):
             base = (p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
             if base:
                 cas.append(base.split('_', 1)[-1].lower())
-    cas += [m['ca'] for m in moves if m['chain'] == 'BSC']
-    cas += st.get('bsc_contracts', [])[:150]
-    cas = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:400]
+    cas = [m['ca'] for m in moves if m['chain'] == 'BSC'] + cas + st.get('bsc_contracts', [])[:40]
+    cas = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:120]
     st['bsc_contracts'] = cas
     return cas
 
