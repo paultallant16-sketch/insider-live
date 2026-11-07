@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Insider Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0f12;--panel:#15181d;--panel2:#1b1f26;--line:#262b33;--text:#e8eaed;--muted:#8b93a1;--faint:#5b6370;
+--green:#3ecf8e;--amber:#f2b84b;--red:#f0616d;--blue:#6aa8ff;--violet:#a98bff;--chip:#20252d}
+@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--panel:#fff;--panel2:#f1f3f6;--line:#e3e6eb;--text:#14171c;--muted:#5d6573;--faint:#8b93a1;--chip:#eef0f4;--green:#14a06a;--amber:#b7790f;--red:#d23b4a;--blue:#2f6fdc;--violet:#6e4fe0}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,sans-serif}
+a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}.sub{color:var(--muted);margin-top:4px;max-width:720px}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px;box-shadow:0 0 0 0 var(--green);animation:p 2s infinite}
+@keyframes p{0%{box-shadow:0 0 0 0 rgba(62,207,142,.6)}70%{box-shadow:0 0 0 8px rgba(62,207,142,0)}100%{box-shadow:0 0 0 0 rgba(62,207,142,0)}}
+.stamp{color:var(--muted);font-size:13px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi b{display:block;font-size:22px;font-weight:600;margin-top:2px}.kpi span{color:var(--muted);font-size:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.tabs button,.chips button{background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer}
+.tabs button.on,.chips button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.tabs{border-bottom:1px solid var(--line);padding-bottom:10px}
+input.q{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;min-width:200px;flex:1;max-width:320px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0}
+tr:last-child td{border-bottom:0}td.n{text-align:right;font-variant-numeric:tabular-nums}th.n{text-align:right}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}.muted{color:var(--muted)}.faint{color:var(--faint)}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.buy{color:var(--green)}.sell{color:var(--red)}.internal{color:var(--faint)}
+.st-live{color:var(--green);border-color:var(--green)}.st-active{color:var(--green)}.st-recent{color:var(--amber)}.st-quiet,.st-dormant{color:var(--faint)}
+.tierA{color:var(--violet);border-color:var(--violet)}
+.chain{font-size:11px;color:var(--muted)}
+.scroll{max-height:70vh;overflow:auto}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--muted);margin-top:14px}
+.note b{color:var(--text)}
+details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ago{white-space:nowrap}
+.up{color:var(--green)}.down{color:var(--red)}
+.btn{display:inline-block;background:var(--text);color:var(--bg);border-radius:8px;padding:7px 12px;font-weight:600}
+@media (max-width:700px){th:nth-child(n+6),td:nth-child(n+6){display:none}.kpi b{font-size:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Insider Live</h1>
+    <div class="sub">Every insider team we found on Solana, Robinhood Chain, BSC, Base and Ethereum, watched around the clock. Each buy is a lead to look at, not a signal to buy: copying these teams lost money after fees in our tests.</div>
+  </div>
+  <div class="stamp"><span class="pulse" id="pulse"></span><span id="stamp">Loading…</span></div>
+</header>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="bar tabs" id="tabs">
+  <button data-t="moves" class="on">Live moves</button>
+  <button data-t="alerts">Alerts</button>
+  <button data-t="teams">Teams</button>
+  <button data-t="new">New tokens</button>
+  <button data-t="about">How it works</button>
+</div>
+<div class="bar">
+  <div class="chips" id="chips"></div>
+  <input class="q" id="q" placeholder="Search token, team or wallet">
+</div>
+<div id="view"></div>
+</div>
+
+<script>
+const CH=['Solana','Robinhood','BSC','Base','Ethereum'];
+const GM={Solana:'sol',Robinhood:'robinhood',BSC:'bsc',Base:'base',Ethereum:'eth'};
+const TX={Solana:'https://solscan.io/tx/',Robinhood:'https://robinhoodchain.blockscout.com/tx/',BSC:'https://bscscan.com/tx/',Base:'https://basescan.org/tx/',Ethereum:'https://etherscan.io/tx/'};
+let D={moves:[],groups:[],alerts:[],disc:[],meta:{}},tab='moves',chain='All',q='';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const now=()=>Date.now()/1000;
+function ago(t){if(!t)return '—';const s=now()-t;if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+function usd(v){if(v==null||isNaN(v))return '—';const a=Math.abs(v);if(a>=1e9)return '$'+(v/1e9).toFixed(2)+'B';if(a>=1e6)return '$'+(v/1e6).toFixed(2)+'M';if(a>=1e3)return '$'+(v/1e3).toFixed(1)+'K';return '$'+v.toFixed(0)}
+const short=w=>w?w.slice(0,6)+'…'+w.slice(-4):'';
+const wl=(c,w)=>`<a class="mono" target="_blank" rel="noopener" href="https://gmgn.ai/${GM[c]}/address/${esc(w)}">${short(w)}</a>`;
+const tk=(c,ca,sym)=>`<a target="_blank" rel="noopener" href="https://gmgn.ai/${GM[c]}/token/${esc(ca)}"><b>${esc(sym||'?')}</b></a>`;
+const gname=id=>(G[id]||{}).name||id;
+let G={};
+const pass=r=>(chain==='All'||r.chain===chain);
+const hit=(...xs)=>!q||xs.join(' ').toLowerCase().includes(q);
+
+async function load(){
+  const b='data/',t='?t='+Date.now();
+  const j=async n=>{try{const r=await fetch(b+n+t);return r.ok?await r.json():{}}catch(e){return {}}};
+  const [m,g,a,d,meta]=await Promise.all([j('moves.json'),j('groups.json'),j('alerts.json'),j('discovery.json'),j('meta.json')]);
+  D={moves:m.rows||[],groups:g.rows||[],alerts:a.rows||[],disc:d.rows||[],meta:meta||{}};
+  G={};D.groups.forEach(x=>G[x.id]=x);
+  render();
+}
+function chips(){
+  $('#chips').innerHTML=['All',...CH].map(c=>`<button class="${c===chain?'on':''}" data-c="${c}">${c==='All'?'All chains':c}</button>`).join('');
+}
+function kpis(){
+  const gs=D.groups.filter(pass), ms=D.moves.filter(pass);
+  const live=gs.filter(g=>g.status==='live').length, act=gs.filter(g=>g.status==='live'||g.status==='active').length;
+  const day=ms.filter(m=>now()-m.ts<86400&&m.side==='buy').length;
+  const al=D.alerts.filter(pass).filter(a=>now()-(a.updated||0)<86400).length;
+  const wallets=gs.reduce((s,g)=>s+(g.n||0),0);
+  $('#kpis').innerHTML=[
+    ['Teams watched',gs.length,wallets+' wallets'],['Trading in the last hour',live,'teams'],['Active today',act,'teams'],
+    ['Team buys, 24 h',day,'across all teams'],['Alerts, 24 h',al,'teams piling into one token']]
+    .map(([k,v,s])=>`<div class="kpi"><span>${k}</span><b>${v}</b><span>${s}</span></div>`).join('');
+  const u=D.meta.updated;$('#stamp').textContent=u?('Last scan '+ago(u)+' · scans every ~10 min'):'Waiting for the first scan';
+  $('#pulse').style.background=(u&&now()-u<1800)?'var(--green)':'var(--amber)';
+}
+function moves(){
+  const rows=D.moves.filter(pass).filter(m=>m.side!=='internal').filter(m=>hit(m.sym,m.ca,m.wallet,...(m.groups||[]).map(gname))).slice(0,400);
+  if(!rows.length)return `<div class="card"><div class="empty">No team trades yet in this view. New buys and sells show up here within about 10 minutes.</div></div>`;
+  return `<div class="card scroll"><table><thead><tr><th>When</th><th>Team</th><th>Side</th><th>Token</th><th class="n">Size</th><th class="n">Market cap</th><th>Wallet</th><th>Tx</th></tr></thead><tbody>${
+    rows.map(m=>`<tr><td class="ago">${ago(m.ts)}</td><td>${(m.groups||[]).slice(0,2).map(g=>esc(gname(g))).join('<br>')}<div class="chain">${m.chain}</div></td>
+    <td class="${m.side}">${m.side}</td><td>${tk(m.chain,m.ca,m.sym)}</td><td class="n">${usd(m.usd)}</td><td class="n">${usd(m.mc)}</td>
+    <td>${wl(m.chain,m.wallet)}</td><td><a class="faint" target="_blank" rel="noopener" href="${TX[m.chain]}${esc(m.tx)}">view</a></td></tr>`).join('')}</tbody></table></div>`;
+}
+function alerts(){
+  const rows=D.alerts.filter(pass).filter(a=>hit(a.sym,a.ca,a.group_name,...(a.group_names||[])));
+  if(!rows.length)return `<div class="card"><div class="empty">No alerts yet. An alert fires when 2+ wallets from one team, or 2+ different teams, buy the same token within 6 hours.</div></div>`;
+  return `<div class="card scroll"><table><thead><tr><th>Alert</th><th>Token</th><th>Who</th><th class="n">Bought</th><th class="n">MC at alert</th><th class="n">MC now</th><th class="n">Change</th></tr></thead><tbody>${
+    rows.map(a=>{const ch=(a.mc_now&&a.mc_at_alert)?(a.mc_now/a.mc_at_alert-1)*100:null;
+    return `<tr><td class="ago">${ago(a.first_alert)}<div class="chain">${a.chain}</div></td><td>${tk(a.chain,a.ca,a.sym)}</td>
+    <td>${a.kind==='group'?`${a.wallets} wallets of <b>${esc(a.group_name)}</b>`:`${a.n_groups} teams: ${esc((a.group_names||[]).join(', '))}`}</td>
+    <td class="n">${usd(a.usd)}</td><td class="n">${usd(a.mc_at_alert||a.mc)}</td><td class="n">${usd(a.mc_now)}</td>
+    <td class="n ${ch>0?'up':ch<0?'down':''}">${ch==null?'—':(ch>0?'+':'')+ch.toFixed(0)+'%'}</td></tr>`}).join('')}</tbody></table></div>`;
+}
+const ORDER={live:0,active:1,recent:2,quiet:3,dormant:4};
+function teams(){
+  const rows=D.groups.filter(pass).filter(g=>hit(g.name,g.id,g.why,...(g.wallets||[]).map(w=>w.w)))
+    .sort((a,b)=>(ORDER[a.status]-ORDER[b.status])||((b.last_ts||0)-(a.last_ts||0)));
+  return `<div class="card scroll"><table><thead><tr><th>Team</th><th>Status</th><th>Last move</th><th class="n">Wallets</th><th class="n">Winners early</th><th class="n">Buys 7 d</th></tr></thead><tbody>${
+    rows.map(g=>`<tr><td><details><summary><b>${esc(g.name)}</b> ${g.tier?`<span class="tag ${g.tier==='A'?'tierA':''}">tier ${esc(g.tier)}</span>`:''}<div class="chain">${g.chain} · ${esc(g.kind)}</div></summary>
+      <div class="muted" style="margin-top:6px">${esc(g.why)}</div><div class="wl">${(g.wallets||[]).map(w=>`<span class="tag">${wl(g.chain,w.w)}${w.role?' · '+esc(w.role):''}</span>`).join('')}</div></details></td>
+      <td><span class="tag st-${g.status}">${g.status}</span></td>
+      <td class="ago">${ago(g.last_ts)}${g.last_sym?`<div class="chain"><span class="${g.last_side}">${g.last_side}</span> ${esc(g.last_sym)}</div>`:''}</td>
+      <td class="n">${g.n||'—'}</td><td class="n">${g.winners??'—'}</td><td class="n">${g.buys_7d||0}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function fresh(){
+  const rows=D.disc.filter(pass).filter(r=>hit(r.sym,r.ca,...(r.groups||[]).map(gname)));
+  if(!rows.length)return `<div class="card"><div class="empty">No new tokens past $500K in the last scans.</div></div>`;
+  return `<div class="card scroll"><table><thead><tr><th>Token</th><th>Launched</th><th class="n">Market cap</th><th class="n">Liquidity</th><th class="n">Volume 24 h</th><th>Our teams in it</th></tr></thead><tbody>${
+    rows.map(r=>`<tr><td>${tk(r.chain,r.ca,r.sym)}<div class="chain">${r.chain}</div></td><td class="ago">${ago(r.created)}</td>
+    <td class="n">${usd(r.mc)}</td><td class="n">${usd(r.liq)}</td><td class="n">${usd(r.vol24)}</td>
+    <td>${(r.groups||[]).length?r.groups.slice(0,3).map(g=>`<span class="tag tierA">${esc(gname(g))}</span>`).join(' '):(r.watched||[]).length?`${r.watched.length} watched wallets`:'<span class="faint">none seen</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function about(){
+  const m=D.meta, r=(m.runs||[])[0]||{};
+  const cs=CH.map(c=>{const x=c==='Solana'?m.solana||{}:(m.chains||{})[c]||{};
+    return `<tr><td>${c}</td><td class="n">${x.wallets??'—'}</td><td class="ago">${ago(x.at)}</td><td class="muted">${c==='Solana'?(x.covered!=null?`${x.covered}/${x.of} wallets checked last pass`:''):(x.head?'block '+x.head:'')}</td></tr>`}).join('');
+  return `<div class="card"><table><thead><tr><th>Chain</th><th class="n">Wallets watched</th><th>Last checked</th><th>Notes</th></tr></thead><tbody>${cs}</tbody></table></div>
+  <div class="note"><b>How it works.</b> A free GitHub job runs about every 10 minutes. It reads every watched team wallet straight from each blockchain's public nodes, prices tokens with GeckoTerminal, and checks newly launched tokens that passed $500K. No computer of yours needs to be on. GitHub can delay scheduled runs at busy times.<br><br>
+  <b>Where the teams come from.</b> A one-off deep study of tokens that passed $500K on each chain: wallets that bought early together across several winners and rarely on failed launches, linked by same-second buys, matching sizes or shared funders.<br><br>
+  <b>Read with care.</b> "Buy" means the wallet received the token; transfers between wallets of the same team are hidden. Sizes are estimates at the scan's price. This is research, not financial advice.<br><br>
+  Last pass: ${r.secs??'—'} s, ${r.new_moves??0} new moves${(r.errors||[]).length?`; notes: ${esc(r.errors.join(' · '))}`:''}.</div>`;
+}
+function render(){
+  chips();kpis();
+  $('#view').innerHTML=({moves,alerts,teams,new:fresh,about})[tab]();
+}
+$('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.t;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));render()};
+$('#chips').onclick=e=>{const b=e.target.closest('button');if(!b)return;chain=b.dataset.c;render()};
+$('#q').oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+load();setInterval(load,120000);setInterval(kpis,30000);
+</script>
+</body>
+</html>
