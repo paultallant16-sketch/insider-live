@@ -92,6 +92,10 @@ class RPC:
                 if 'error' in r:
                     err = RuntimeError(str(r['error'])[:200])
                     msg = str(r['error']).lower()
+                    if 'rate' in msg or 'traffic' in msg or 'capacity' in msg:
+                        time.sleep(1.5 * (k + 1))
+                        self.i += 1
+                        continue
                     if any(s in msg for s in ('range', 'limit', 'too many', 'exceed', 'large')):
                         raise err          # caller shrinks the range
                     self.i += 1
@@ -197,7 +201,8 @@ def scan_evm(chain, cfg, wallets, st, newmoves):
     rng = cur.get('range', cfg['max_range'])
     logs = []
     b = start
-    while b <= head and left() > 60:
+    t_end = time.time() + 100      # per-chain cap so one slow chain cannot starve the rest
+    while b <= head and left() > 60 and time.time() < t_end:
         e = min(head, b + rng - 1)
         try:
             got = []
@@ -410,7 +415,7 @@ def main():
     disc = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'discovery.json'), {}).get('rows', [])}
 
     newmoves = []
-    chains_order = ['Solana', 'BSC', 'Robinhood', 'Base', 'Ethereum']
+    chains_order = ['BSC', 'Robinhood', 'Base', 'Ethereum', 'Solana']
     for chain in chains_order:
         if left() < 120:
             ERRORS.append(f'{chain}: skipped this pass (time budget)')
@@ -454,6 +459,8 @@ def main():
             usd = None
         if usd is None and amount is not None and info.get('price'):
             usd = amount * info['price']
+        if usd is not None and usd < 5:
+            continue                       # dust, spam airdrops and rounding noise
         gids = watch.get(m['chain'], {}).get(m['wallet'] if m['chain'] == 'Solana' else m['wallet'].lower()) \
             or watch.get(m['chain'], {}).get(m['wallet'], [])
         moves.append(dict(chain=m['chain'], wallet=m['wallet'], groups=gids, ts=m['ts'], side=m['side'],
