@@ -270,7 +270,7 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
 
 
 # ---------------------------------------------------------------- Blockscout (per wallet, no key)
-BLOCKSCOUT = {'Base': 'https://base.blockscout.com', 'Ethereum': 'https://eth.blockscout.com'}
+BLOCKSCOUT = {'Ethereum': 'https://eth.blockscout.com'}
 
 
 def scan_blockscout(chain, wallets, st, newmoves):
@@ -327,13 +327,14 @@ def scan_blockscout(chain, wallets, st, newmoves):
     cur['at'] = NOW
 
 
-def bsc_contracts(st, moves):
+def bsc_contracts(st, moves, chain='BSC'):
     """BSC public nodes only answer log queries scoped to token contracts, so watch trending and new
     BSC tokens plus every token our teams touched in the last 7 days."""
     cas = []
-    for path in ('/networks/bsc/trending_pools?duration=5m&page=1', '/networks/bsc/trending_pools?duration=1h&page=1',
-                 '/networks/bsc/trending_pools?duration=6h&page=1', '/networks/bsc/new_pools?page=1',
-                 '/networks/bsc/new_pools?page=2', '/networks/bsc/new_pools?page=3'):
+    n = GT_NET[chain]
+    for path in (f'/networks/{n}/trending_pools?duration=5m&page=1', f'/networks/{n}/trending_pools?duration=1h&page=1',
+                 f'/networks/{n}/trending_pools?duration=6h&page=1', f'/networks/{n}/new_pools?page=1',
+                 f'/networks/{n}/new_pools?page=2', f'/networks/{n}/new_pools?page=3'):
         if left() < 200:
             break
         r = GT.get(path)
@@ -341,9 +342,10 @@ def bsc_contracts(st, moves):
             base = (p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
             if base:
                 cas.append(base.split('_', 1)[-1].lower())
-    cas = [m['ca'] for m in moves if m['chain'] == 'BSC'] + cas + st.get('bsc_contracts', [])[:40]
+    key = f'{chain.lower()}_contracts'
+    cas = [m['ca'] for m in moves if m['chain'] == chain] + cas + st.get(key, [])[:40]
     cas = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:120]
-    st['bsc_contracts'] = cas
+    st[key] = cas
     return cas
 
 
@@ -508,9 +510,9 @@ def main():
                 scan_solana(list(watch.get('Solana', {})), st, newmoves)
             elif chain in BLOCKSCOUT:
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
-            elif chain == 'BSC':
+            elif chain in ('BSC', 'Base'):
                 scan_evm(chain, EVM[chain], [w.lower() for w in watch.get(chain, {})], st, newmoves,
-                         contracts=bsc_contracts(st, moves))
+                         contracts=bsc_contracts(st, moves, chain))
             else:
                 scan_evm(chain, EVM[chain], [w.lower() for w in watch.get(chain, {})], st, newmoves)
         except Exception as e:
