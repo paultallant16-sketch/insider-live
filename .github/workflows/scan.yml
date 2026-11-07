@@ -1,7 +1,7 @@
 name: scan
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -11,22 +11,25 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 14
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Scan all chains
-        run: python scanner/scan.py
+      - name: Scan all chains on a loop (about 5.5 hours per job)
         env:
-          RUN_BUDGET: '540'
-      - name: Save results
+          RUN_BUDGET: '420'
         run: |
           git config user.name  "insider-live-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data docs/data
-          git diff --cached --quiet && exit 0
-          git commit -m "scan $(date -u +'%Y-%m-%d %H:%M')" -q
-          for i in 1 2 3; do git pull --rebase -q && git push -q && exit 0; sleep 5; done
-          exit 1
+          end=$(( $(date +%s) + 5*3600 + 1800 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            python scanner/scan.py || true
+            git add data docs/data
+            if ! git diff --cached --quiet; then
+              git commit -m "scan $(date -u +'%Y-%m-%d %H:%M')" -q
+              for i in 1 2 3; do git pull --rebase -q -X ours && git push -q && break; sleep 5; done
+            fi
+            sleep 60
+          done
