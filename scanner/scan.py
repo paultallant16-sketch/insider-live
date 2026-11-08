@@ -8,7 +8,7 @@ Runs on a timer (GitHub Actions). Standard library only.
 Writes the dashboard data to docs/data/*.json and its own cursor to data/state.json.
 Everything here is read-only public chain data. Nothing trades.
 """
-import json, os, sys, time, urllib.request, urllib.error, datetime as dt
+import json, os, sys, time, html, zlib, urllib.request, urllib.error, datetime as dt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, 'data')
@@ -153,15 +153,52 @@ def token_info(chain, addrs, cache):
         if left() < 25:
             break
         chunk = addrs[i:i + 30]
-        r = GT.get(f'/networks/{net}/tokens/multi/{",".join(chunk)}')
+        r = GT.get(f'/networks/{net}/tokens/multi/{",".join(chunk)}?include=top_pools')
+        pools = {p.get('id'): p.get('attributes') or {} for p in (r or {}).get('included', [])}
         for t in (r or {}).get('data', []):
             a = t.get('attributes', {})
             addr = a.get('address') or t.get('id', '').split('_', 1)[-1]
             key = f'{chain}|{addr if chain == "Solana" else addr.lower()}'
-            mc = a.get('market_cap_usd') or a.get('fdv_usd')
-            cache[key] = dict(sym=(a.get('symbol') or '?')[:24], name=(a.get('name') or '')[:40],
-                              dec=a.get('decimals'), price=_f(a.get('price_usd')), mc=_f(mc),
-                              liq=_f(a.get('total_reserve_in_usd')), at=NOW)
+            mc = _f(a.get('market_cap_usd') or a.get('fdv_usd'))
+            old = cache.get(key) or {}
+            row = dict(sym=(a.get('symbol') or '?')[:24], name=(a.get('name') or '')[:40],
+                       dec=a.get('decimals'), price=_f(a.get('price_usd')), mc=mc,
+                       liq=_f(a.get('total_reserve_in_usd')), at=NOW,
+                       peak=max(old.get('peak') or 0, mc or 0) or None, created=old.get('created'))
+            tp = ((t.get('relationships') or {}).get('top_pools') or {}).get('data') or []
+            pa = pools.get(tp[0].get('id')) if tp else None
+            if pa:
+                pc = pa.get('price_change_percentage') or {}
+                try:
+                    row['created'] = int(dt.datetime.fromisoformat(pa['pool_created_at'].replace('Z', '+00:00')).timestamp())
+                except Exception:
+                    pass
+                row.update(ch1=_f(pc.get('h1')), ch6=_f(pc.get('h6')), ch24=_f(pc.get('h24')),
+                           vol24=_f((pa.get('volume_usd') or {}).get('h24')))
+            cache[key] = row
+            row['sym'] = html.unescape(row['sym'])
+            row['name'] = html.unescape(row['name'])
+
+
+def token_state(info):
+    """fresh / running / fading / older, so the page can push already-dumped tokens out of the way."""
+    mc, peak, created = info.get('mc'), info.get('peak'), info.get('created')
+    ch1, ch6, ch24 = info.get('ch1'), info.get('ch6'), info.get('ch24')
+    age_h = (NOW - created) / 3600 if created else None
+    if (ch6 is not None and ch6 <= -35) or (ch24 is not None and ch24 <= -60) or (peak and mc and mc < 0.4 * peak):
+        return 'fading', age_h
+    if age_h is not None and age_h <= 24:
+        return 'fresh', age_h
+    if (ch1 or 0) >= 10 or (ch6 or 0) >= 25:
+        return 'running', age_h
+    return 'older', age_h
+
+
+def token_extra(info):
+    state, age_h = token_state(info)
+    return dict(state=state, age_h=round(age_h, 1) if age_h is not None else None, created=info.get('created'),
+                ch1=info.get('ch1'), ch6=info.get('ch6'), ch24=info.get('ch24'), vol24=info.get('vol24'),
+                peak=info.get('peak'))
 
 
 def _f(x):
@@ -462,6 +499,75 @@ def discover(chain, watch_set, disc):
         r['watched'] = sorted(hits)
 
 
+# ---------------------------------------------------------------- team labels
+ADJ = ['Amber', 'Arctic', 'Ash', 'Azure', 'Black', 'Blaze', 'Bronze', 'Cedar', 'Chrome', 'Cobalt', 'Copper', 'Coral',
+       'Crimson', 'Dawn', 'Dusk', 'Ember', 'Emerald', 'Frost', 'Ghost', 'Gold', 'Granite', 'Iron', 'Ivory', 'Jade',
+       'Lunar', 'Midnight', 'Neon', 'Night', 'Obsidian', 'Onyx', 'Orchid', 'Phantom', 'Pine', 'Quartz', 'Rapid',
+       'Raven', 'Ruby', 'Rust', 'Sable', 'Sage', 'Scarlet', 'Shadow', 'Silent', 'Silver', 'Slate', 'Solar', 'Steel',
+       'Storm', 'Swift', 'Thunder', 'Tidal', 'Titan', 'Velvet', 'Violet', 'Wild', 'Winter', 'Zinc', 'Hollow', 'Echo']
+NOUN = ['Badgers', 'Bears', 'Bees', 'Bulls', 'Cobras', 'Comets', 'Condors', 'Coyotes', 'Cranes', 'Crows', 'Dingos',
+        'Eagles', 'Falcons', 'Foxes', 'Geckos', 'Hawks', 'Herons', 'Hornets', 'Hounds', 'Jackals', 'Jaguars', 'Kites',
+        'Lions', 'Lynxes', 'Mantas', 'Marlins', 'Minks', 'Moths', 'Orcas', 'Otters', 'Owls', 'Panthers', 'Pumas',
+        'Ravens', 'Rhinos', 'Sharks', 'Sparrows', 'Stags', 'Swifts', 'Tigers', 'Vipers', 'Wasps', 'Wolves', 'Wrens']
+CHAIN_SHORT = {'Solana': 'SOL', 'Robinhood': 'RH', 'BSC': 'BSC', 'Base': 'BASE', 'Ethereum': 'ETH'}
+
+
+def team_style(g):
+    """What kind of operation this is, in plain words, from how the research linked the wallets."""
+    n, k = g['name'].lower(), g['kind']
+    if k == 'copy':
+        return 'Copy-trade picks', 'Hand-picked wallets that tested well when copied.'
+    if k == 'deployer' or 'deployer' in n or 'launch' in n:
+        return 'Launch team', 'Wallets tied to the token creator; they buy their own launches early.'
+    if 'farm' in n or (n.startswith('funder ') and g['n'] >= 10):
+        return 'Wallet farm', 'Many fresh wallets funded from one source, buying together to look like separate people.'
+    if 'same-second' in n or 'same-block' in n:
+        return 'Same-second snipers', 'Wallets that buy in the very same second, so one person or bot runs them.'
+    if 'same-minute' in n:
+        return 'Same-minute crew', 'Wallets that keep buying the same new tokens within a minute of each other.'
+    if 'funder' in n:
+        return 'One-funder crew', 'Wallets all funded by the same source wallet, trading the same tokens.'
+    if k == 'cluster':
+        return 'Linked cluster', 'Wallets linked by funding and timing that show up early together.'
+    if k == 'solo' or g['n'] == 1:
+        if 'insider' in n:
+            return 'Solo insider', 'One wallet that keeps getting into winners before they pump.'
+        return 'Smart early buyer', 'One wallet that is repeatedly early on tokens that go on to run.'
+    return 'Insider team', 'Wallets linked together that keep getting in early on the same winners.'
+
+
+def team_grade(g):
+    w, f = g['winners'], g['failed']
+    hit = w / (w + f) if (w + f) else 0
+    if g['kind'] == 'copy':
+        return 'Tested', hit
+    if w >= 10 and hit >= 0.75:
+        return 'Elite', hit
+    if w >= 5 and hit >= 0.6:
+        return 'Strong', hit
+    if w >= 3:
+        return 'Decent', hit
+    return 'Unproven', hit
+
+
+def label_groups(groups):
+    used = set()
+    for g in sorted(groups, key=lambda g: g['id']):
+        h = zlib.crc32(g['id'].encode())
+        while True:
+            nick = f"{ADJ[h % len(ADJ)]} {NOUN[(h >> 12) % len(NOUN)]}"
+            if (g['chain'], nick) not in used:
+                break
+            h = (h * 2654435761 + 1) & 0xffffffff
+        used.add((g['chain'], nick))
+        style, about = team_style(g)
+        grade, hit = team_grade(g)
+        g.update(nick=nick, style=style, about=about, grade=grade, hit=round(hit, 3),
+                 label=f"{nick} · {style}", short=f"{nick} ({CHAIN_SHORT.get(g['chain'], g['chain'])})",
+                 research_name=g['name'])
+    return groups
+
+
 # ---------------------------------------------------------------- seed
 ROLE = {'l': 'leader', 'm': 'member', 'f': 'funder', 's': 'solo', 'd': 'deployer'}
 
@@ -487,7 +593,7 @@ def load_seed():
             groups.append(dict(id=gid, chain=chain, kind=p[2], tier=p[3], name=p[4], n=len(ws),
                                winners=int(p[5] or 0), failed=int(p[6] or 0), profit=int(p[7] or 0),
                                seed_last_ts=int(p[8]) if p[8] else None, wallets=ws))
-    return groups, watch
+    return label_groups(groups), watch
 
 
 # ---------------------------------------------------------------- main
@@ -585,7 +691,7 @@ def main():
         out_groups.append(r)
 
     # alerts: several wallets of one group, or several groups, buying the same token within 6 h
-    gname = {g['id']: g['name'] for g in groups}
+    gname = {g['id']: g['short'] for g in groups}
     win = NOW - 6 * 3600
     buys = {}
     for m in moves:
@@ -621,11 +727,58 @@ def main():
             token_info(chain, cas[:60], tokens)
     for a in alerts:
         info = tokens.get(f"{a['chain']}|{a['ca']}") or {}
+        if info:
+            a.update(token_extra(info))
         if info.get('mc'):
             a['mc_now'] = info['mc']
             a.setdefault('mc_at_alert', a.get('mc') or info['mc'])
             a['peak_mc'] = max(a.get('peak_mc') or 0, info['mc'])
     alerts.sort(key=lambda a: -a.get('updated', 0))
+
+    # hot board: every token our teams bought in the last 3 days, and how it has done since the first team buy
+    since3 = NOW - 3 * 86400
+    hot = {}
+    for m in sorted(moves, key=lambda m: m['ts']):
+        if m['side'] == 'internal' or m['ts'] < since3:
+            continue
+        k = f"{m['chain']}|{m['ca']}"
+        h = hot.setdefault(k, dict(chain=m['chain'], ca=m['ca'], sym=m['sym'], first_buy=None, mc_first=None,
+                                   buy_usd=0.0, sell_usd=0.0, buys=0, sells=0, wallets=set(), groups=set(),
+                                   last=0, buys_6h=0, usd_6h=0.0, groups_6h=set()))
+        h['last'] = max(h['last'], m['ts'])
+        if m['side'] == 'buy':
+            if h['first_buy'] is None:
+                h['first_buy'], h['mc_first'] = m['ts'], m.get('mc')
+            h['buys'] += 1
+            h['last_buy'] = m['ts']
+            h['buy_usd'] += m.get('usd') or 0
+            h['wallets'].add(m['wallet'])
+            h['groups'].update(m['groups'])
+            if m['ts'] >= NOW - 6 * 3600:
+                h['buys_6h'] += 1
+                h['usd_6h'] += m.get('usd') or 0
+                h['groups_6h'].update(m['groups'])
+        else:
+            h['sells'] += 1
+            h['sell_usd'] += m.get('usd') or 0
+    hot = {k: h for k, h in hot.items() if h['first_buy']}
+    for chain in GT_NET:
+        cas = [h['ca'] for h in sorted(hot.values(), key=lambda h: -h['last']) if h['chain'] == chain][:90]
+        if cas and left() > 50:
+            token_info(chain, cas, tokens)
+    hrows = []
+    for h in hot.values():
+        info = tokens.get(f"{h['chain']}|{h['ca']}") or {}
+        mc_now = info.get('mc')
+        chg = (mc_now / h['mc_first'] - 1) if (mc_now and h['mc_first']) else None
+        hrows.append(dict(chain=h['chain'], ca=h['ca'], sym=info.get('sym') or h['sym'], first_buy=h['first_buy'],
+                          last=h['last'], last_buy=h.get('last_buy'), mc_first=h['mc_first'], mc_now=mc_now,
+                          change=round(chg, 4) if chg is not None else None, liq=info.get('liq'),
+                          buy_usd=round(h['buy_usd'], 2), sell_usd=round(h['sell_usd'], 2), buys=h['buys'],
+                          sells=h['sells'], n_wallets=len(h['wallets']), n_groups=len(h['groups']),
+                          groups=sorted(h['groups'])[:8], buys_6h=h['buys_6h'], usd_6h=round(h['usd_6h'], 2),
+                          groups_6h=sorted(h['groups_6h'])[:12], **token_extra(info)))
+    hrows.sort(key=lambda r: -(r['last_buy'] or 0))
 
     # discovery: new tokens past $500K, and whether watched wallets are in
     watch_set = {}
@@ -662,6 +815,7 @@ def main():
     save(os.path.join(OUT, 'moves.json'), dict(updated=NOW, rows=moves))
     save(os.path.join(OUT, 'groups.json'), dict(updated=NOW, rows=out_groups))
     save(os.path.join(OUT, 'alerts.json'), dict(updated=NOW, rows=alerts[:500]))
+    save(os.path.join(OUT, 'hot.json'), dict(updated=NOW, rows=hrows[:800]))
     save(os.path.join(OUT, 'discovery.json'), dict(updated=NOW, rows=drows[:400]))
     save(os.path.join(OUT, 'meta.json'), meta)
     save(os.path.join(DATA, 'state.json'), st)
