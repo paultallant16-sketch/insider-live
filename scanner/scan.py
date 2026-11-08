@@ -588,7 +588,7 @@ GMGN_NET = {'Solana': 'sol', 'Robinhood': 'robinhood', 'BSC': 'bsc', 'Base': 'ba
 
 
 def notify(rows, gmap):
-    topic = os.environ.get('NTFY_TOPIC', '').strip()
+    topic = os.environ.get('NTFY_TOPIC', 'insider-live-49ab55a62a52').strip()
     for r in rows:
         if r.get('notified'):
             continue
