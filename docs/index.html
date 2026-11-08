@@ -8,43 +8,61 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0d0f12;--panel:#15181d;--panel2:#1b1f26;--line:#262b33;--text:#e8eaed;--muted:#8b93a1;--faint:#5b6370;
---green:#3ecf8e;--amber:#f2b84b;--red:#f0616d;--blue:#6aa8ff;--violet:#a98bff;--chip:#20252d}
-@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--panel:#fff;--panel2:#f1f3f6;--line:#e3e6eb;--text:#14171c;--muted:#5d6573;--faint:#8b93a1;--chip:#eef0f4;--green:#14a06a;--amber:#b7790f;--red:#d23b4a;--blue:#2f6fdc;--violet:#6e4fe0}}
+--green:#3ecf8e;--amber:#f2b84b;--red:#f0616d;--blue:#6aa8ff;--violet:#a98bff;--chip:#20252d;--hot:#ff7a45}
+@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--panel:#fff;--panel2:#f1f3f6;--line:#e3e6eb;--text:#14171c;--muted:#5d6573;--faint:#8b93a1;--chip:#eef0f4;--green:#14a06a;--amber:#b7790f;--red:#d23b4a;--blue:#2f6fdc;--violet:#6e4fe0;--hot:#e0561c}}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,sans-serif}
 a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}
 .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
-header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:12px}
 h1{font-size:22px;margin:0;letter-spacing:-.01em}.sub{color:var(--muted);margin-top:4px;max-width:720px}
-.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px;box-shadow:0 0 0 0 var(--green);animation:p 2s infinite}
+h2{font-size:16px;margin:18px 0 4px}.lead{color:var(--muted);margin:0 0 12px;max-width:820px}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px;animation:p 2s infinite}
+.pulse.stale{background:var(--amber);animation:none}
 @keyframes p{0%{box-shadow:0 0 0 0 rgba(62,207,142,.6)}70%{box-shadow:0 0 0 8px rgba(62,207,142,0)}100%{box-shadow:0 0 0 0 rgba(62,207,142,0)}}
 .stamp{color:var(--muted);font-size:13px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:12px 0}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .kpi b{display:block;font-size:22px;font-weight:600;margin-top:2px}.kpi span{color:var(--muted);font-size:12px}
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
-.tabs button,.chips button{background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer}
-.tabs button.on,.chips button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
-.tabs{border-bottom:1px solid var(--line);padding-bottom:10px}
-input.q{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;min-width:200px;flex:1;max-width:320px}
+.tabs{display:flex;gap:6px;overflow-x:auto;border-bottom:1px solid var(--line);padding-bottom:10px;scrollbar-width:none}
+.tabs button,.chips button,.seg button{background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer;white-space:nowrap}
+.tabs button.on,.chips button.on,.seg button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+input.q{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;min-width:160px;flex:1;max-width:300px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
-th{font-size:12px;color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0}
-tr:last-child td{border-bottom:0}td.n{text-align:right;font-variant-numeric:tabular-nums}th.n{text-align:right}
+th{font-size:12px;color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0;z-index:1}
+tr:last-child td{border-bottom:0}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .mono{font-family:"JetBrains Mono",monospace;font-size:12px}.muted{color:var(--muted)}.faint{color:var(--faint)}
 .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.buy{color:var(--green)}.sell{color:var(--red)}.internal{color:var(--faint)}
+.g-Elite{color:var(--violet);border-color:var(--violet)}.g-Strong{color:var(--blue);border-color:var(--blue)}.g-Decent{color:var(--amber)}.g-Tested{color:var(--green)}
+.buy{color:var(--green)}.sell{color:var(--red)}
 .st-live{color:var(--green);border-color:var(--green)}.st-active{color:var(--green)}.st-recent{color:var(--amber)}.st-quiet,.st-dormant{color:var(--faint)}
-.tierA{color:var(--violet);border-color:var(--violet)}
 .chain{font-size:11px;color:var(--muted)}
-.scroll{max-height:70vh;overflow:auto}
+.scroll{max-height:72vh;overflow:auto}
 .empty{padding:28px;text-align:center;color:var(--muted)}
 .note{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--muted);margin-top:14px}
-.note b{color:var(--text)}
+.note b{color:var(--text)}.note p{margin:6px 0}
 details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.ago{white-space:nowrap}
 .up{color:var(--green)}.down{color:var(--red)}
-.btn{display:inline-block;background:var(--text);color:var(--bg);border-radius:8px;padding:7px 12px;font-weight:600}
-@media (max-width:700px){th:nth-child(n+6),td:nth-child(n+6){display:none}.kpi b{font-size:18px}}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.tok{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.tok.fire{border-color:var(--hot);box-shadow:0 0 0 1px color-mix(in srgb,var(--hot) 35%,transparent)}
+.tok .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.tok .sym{font-size:18px;font-weight:700;letter-spacing:-.01em}
+.heat{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.heat.h3{background:var(--hot);color:#fff}.heat.h2{color:var(--hot);border:1px solid var(--hot)}
+.tok .what{font-size:14px}.tok .what b{font-weight:600}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.stats div{background:var(--panel2);border-radius:8px;padding:6px 8px}.stats span{display:block;font-size:11px;color:var(--muted)}.stats b{font-size:14px;font-variant-numeric:tabular-nums}
+.teams{display:flex;flex-wrap:wrap;gap:5px}
+.links{display:flex;gap:12px;font-size:12px;color:var(--blue);margin-top:auto}
+.feed{list-style:none;margin:0;padding:0}.feed li{display:flex;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:baseline}
+.feed li:last-child{border-bottom:0}.feed .t{color:var(--muted);font-size:12px;min-width:62px;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.dot.buy{background:var(--green)}.dot.sell{background:var(--red)}
+.summary{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.summary .kpi{flex:1;min-width:150px}
+.meter{height:8px;border-radius:99px;background:var(--red);overflow:hidden;margin-top:6px}.meter i{display:block;height:100%;background:var(--green)}
+@media (max-width:700px){.hide-m{display:none}.kpi b{font-size:18px}.stats{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -52,19 +70,21 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
 <header>
   <div>
     <h1>Insider Live</h1>
-    <div class="sub">Every insider team we found on Solana, Robinhood Chain, BSC, Base and Ethereum, watched around the clock. Each buy is a lead to look at, not a signal to buy: copying these teams lost money after fees in our tests.</div>
+    <div class="sub">What the insider teams we found are buying right now on Solana, Robinhood Chain, BSC, Base and Ethereum, and how those buys have done since. A team buying is a lead to look at, not a reason to buy.</div>
   </div>
   <div class="stamp"><span class="pulse" id="pulse"></span><span id="stamp">Loading…</span></div>
 </header>
 
 <div class="kpis" id="kpis"></div>
 
-<div class="bar tabs" id="tabs">
-  <button data-t="moves" class="on">Live moves</button>
-  <button data-t="alerts">Alerts</button>
-  <button data-t="teams">Teams</button>
-  <button data-t="new">New tokens</button>
-  <button data-t="about">How it works</button>
+<div class="tabs" id="tabs">
+  <button data-v="hot" class="on">Hot now</button>
+  <button data-v="best">Best last 3 days</button>
+  <button data-v="feed">Live feed</button>
+  <button data-v="teams">Teams</button>
+  <button data-v="alerts">Alerts</button>
+  <button data-v="new">New tokens</button>
+  <button data-v="how">How to read this</button>
 </div>
 <div class="bar">
   <div class="chips" id="chips"></div>
@@ -74,102 +94,166 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
 </div>
 
 <script>
-const CH=['Solana','Robinhood','BSC','Base','Ethereum'];
+const CH=['All','Solana','Robinhood','BSC','Base','Ethereum'];
 const GM={Solana:'sol',Robinhood:'robinhood',BSC:'bsc',Base:'base',Ethereum:'eth'};
-const TX={Solana:'https://solscan.io/tx/',Robinhood:'https://robinhoodchain.blockscout.com/tx/',BSC:'https://bscscan.com/tx/',Base:'https://basescan.org/tx/',Ethereum:'https://etherscan.io/tx/'};
-let D={moves:[],groups:[],alerts:[],disc:[],meta:{}},tab='moves',chain='All',q='';
+const DS={Solana:'solana',Robinhood:'robinhood',BSC:'bsc',Base:'base',Ethereum:'ethereum'};
+let D={moves:[],groups:[],alerts:[],disc:[],hot:[],meta:{}};let view='hot',chain='All',q='',bestMode='best',age='fresh',fading=false;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const now=()=>Date.now()/1000;
-function ago(t){if(!t)return '—';const s=now()-t;if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
-function usd(v){if(v==null||isNaN(v))return '—';const a=Math.abs(v);if(a>=1e9)return '$'+(v/1e9).toFixed(2)+'B';if(a>=1e6)return '$'+(v/1e6).toFixed(2)+'M';if(a>=1e3)return '$'+(v/1e3).toFixed(1)+'K';return '$'+v.toFixed(0)}
-const short=w=>w?w.slice(0,6)+'…'+w.slice(-4):'';
-const wl=(c,w)=>`<a class="mono" target="_blank" rel="noopener" href="https://gmgn.ai/${GM[c]}/address/${esc(w)}">${short(w)}</a>`;
-const tk=(c,ca,sym)=>`<a target="_blank" rel="noopener" href="https://gmgn.ai/${GM[c]}/token/${esc(ca)}"><b>${esc(sym||'?')}</b></a>`;
-const gname=id=>(G[id]||{}).name||id;
-let G={};
-const pass=r=>(chain==='All'||r.chain===chain);
-const hit=(...xs)=>!q||xs.join(' ').toLowerCase().includes(q);
-
+function ago(t){if(!t)return'—';const s=now()-t;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+function usd(v){if(v==null||isNaN(v))return'—';const a=Math.abs(v);if(a>=1e9)return'$'+(v/1e9).toFixed(2)+'B';if(a>=1e6)return'$'+(v/1e6).toFixed(a>=1e7?1:2)+'M';if(a>=1e3)return'$'+(v/1e3).toFixed(a>=1e4?0:1)+'K';return'$'+v.toFixed(a>=100?0:a>=1?0:2)}
+function pct(c){if(c==null)return'<span class="faint">—</span>';const p=c*100;const s=(p>0?'+':'')+(Math.abs(p)>=1000?Math.round(p).toLocaleString():p.toFixed(Math.abs(p)<10?1:0))+'%';return`<span class="${p>0.5?'up':p<-0.5?'down':'muted'}">${s}</span>`}
+const short=a=>a?a.slice(0,4)+'…'+a.slice(-4):'';
+const gmgn=(c,ca)=>`https://gmgn.ai/${GM[c]||c}/token/${ca}`;
+const dex=(c,ca)=>`https://dexscreener.com/${DS[c]||c}/${ca}`;
+const G=()=>Object.fromEntries(D.groups.map(g=>[g.id,g]));
+function gname(id,full){const g=G()[id];if(!g)return id;return full?(g.label||g.name):(g.nick||g.name)}
+function teamChip(id){const g=G()[id];if(!g)return`<span class="tag">${esc(id)}</span>`;return`<span class="tag g-${esc(g.grade||'')}" title="${esc((g.style||'')+' · '+(g.grade||'')+' · '+g.winners+' wins / '+g.failed+' misses')}">${esc(g.nick||g.name)}</span>`}
+async function j(f){try{const r=await fetch('data/'+f+'?t='+Date.now());if(!r.ok)return null;return await r.json()}catch(e){return null}}
 async function load(){
-  const b='data/',t='?t='+Date.now();
-  const j=async n=>{try{const r=await fetch(b+n+t);return r.ok?await r.json():{}}catch(e){return {}}};
-  const [m,g,a,d,meta]=await Promise.all([j('moves.json'),j('groups.json'),j('alerts.json'),j('discovery.json'),j('meta.json')]);
-  D={moves:m.rows||[],groups:g.rows||[],alerts:a.rows||[],disc:d.rows||[],meta:meta||{}};
-  G={};D.groups.forEach(x=>G[x.id]=x);
-  render();
+  const [m,g,a,d,h,meta]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json'].map(j));
+  D={moves:m?.rows||[],groups:g?.rows||[],alerts:a?.rows||[],disc:d?.rows||[],hot:h?.rows||null,meta:meta||{}};
+  if(!D.hot)D.hot=buildHot();
+  const up=D.meta.updated;const stale=!up||now()-up>3600;
+  $('#pulse').className='pulse'+(stale?' stale':'');
+  $('#stamp').textContent=up?`Scanned ${ago(up)} · refreshes every 2 min`:'Waiting for the first scan';
+  kpis();render();
 }
-function chips(){
-  $('#chips').innerHTML=['All',...CH].map(c=>`<button class="${c===chain?'on':''}" data-c="${c}">${c==='All'?'All chains':c}</button>`).join('');
+function buildHot(){// fallback if the scanner has not written hot.json yet
+  const since=now()-3*86400,H={};
+  [...D.moves].sort((a,b)=>a.ts-b.ts).forEach(m=>{if(m.side==='internal'||m.ts<since)return;const k=m.chain+'|'+m.ca;
+    const h=H[k]||(H[k]={chain:m.chain,ca:m.ca,sym:m.sym,first_buy:null,mc_first:null,mc_now:m.mc,buy_usd:0,sell_usd:0,buys:0,sells:0,w:new Set(),g:new Set(),last:0,buys_6h:0,usd_6h:0,g6:new Set()});
+    h.last=Math.max(h.last,m.ts);h.mc_now=m.mc||h.mc_now;
+    if(m.side==='buy'){if(!h.first_buy){h.first_buy=m.ts;h.mc_first=m.mc}h.buys++;h.buy_usd+=m.usd||0;h.w.add(m.wallet);(m.groups||[]).forEach(x=>h.g.add(x));
+      if(m.ts>=now()-6*3600){h.buys_6h++;h.usd_6h+=m.usd||0;(m.groups||[]).forEach(x=>h.g6.add(x))}}else{h.sells++;h.sell_usd+=m.usd||0}});
+  return Object.values(H).filter(h=>h.first_buy).map(h=>({...h,n_wallets:h.w.size,n_groups:h.g.size,groups:[...h.g],groups_6h:[...h.g6],change:h.mc_first&&h.mc_now?h.mc_now/h.mc_first-1:null}));
 }
+const inChain=r=>chain==='All'||r.chain===chain;
+function match(r,extra=''){if(!q)return true;const s=(r.sym+' '+r.ca+' '+(r.groups||[]).map(x=>gname(x,true)).join(' ')+' '+extra).toLowerCase();return s.includes(q)}
+const AGE_MAX=72;
+function ageTxt(h){if(h.age_h==null)return'age ?';const a=h.age_h;return a<1?Math.round(a*60)+'m old':a<48?Math.round(a)+'h old':Math.round(a/24)+'d old'}
+function freshOK(h){if(!fading&&h.state==='fading')return false;if(age==='fresh')return h.age_h!=null&&h.age_h<=AGE_MAX;return true}
+function stateTag(h){const m={fresh:['Fresh','up'],running:['Running','up'],fading:['Fading','down'],older:h.age_h!=null&&h.age_h<=72?['Young','muted']:['Older','faint']}[h.state];return m?`<span class="tag ${m[1]}">${m[0]}</span>`:''}
+function freshBar(){return`<div class="bar seg"><button data-a="fresh" class="${age==='fresh'?'on':''}">Fresh only (under 3 days)</button><button data-a="all" class="${age==='all'?'on':''}">Any age</button><button data-x="1" class="${fading?'on':''}">${fading?'Showing':'Hiding'} fading tokens</button></div>`}
+const GW={Elite:3,Strong:2,Tested:2,Decent:1,Unproven:.5};
+const g6=h=>Array.isArray(h.groups_6h)?h.groups_6h:(h.groups||[]);
+function teamScore(h){return g6(h).reduce((s,id)=>s+(GW[G()[id]?.grade]??.5),0)}
+function heat(h){return teamScore(h)*3+Math.min(h.n_wallets,6)+Math.log10(1+(h.usd_6h||0))}
 function kpis(){
-  const gs=D.groups.filter(pass), ms=D.moves.filter(pass);
-  const live=gs.filter(g=>g.status==='live').length, act=gs.filter(g=>g.status==='live'||g.status==='active').length;
-  const day=ms.filter(m=>now()-m.ts<86400&&m.side==='buy').length;
-  const al=D.alerts.filter(pass).filter(a=>now()-(a.updated||0)<86400).length;
-  const wallets=gs.reduce((s,g)=>s+(g.n||0),0);
+  const t6=now()-6*3600,t24=now()-86400;
+  const b6=D.moves.filter(m=>m.side==='buy'&&m.ts>=t6&&inChain(m));
+  const act=new Set();D.moves.filter(m=>m.ts>=t24&&m.side!=='internal'&&inChain(m)).forEach(m=>(m.groups||[]).forEach(g=>act.add(g)));
+  const hot=D.hot.filter(h=>inChain(h)&&h.buys_6h>0).length;
+  const b3=D.hot.filter(h=>inChain(h)&&h.change!=null);const upN=b3.filter(h=>h.change>0).length;
   $('#kpis').innerHTML=[
-    ['Teams watched',gs.length,wallets+' wallets'],['Trading in the last hour',live,'teams'],['Active today',act,'teams'],
-    ['Team buys, 24 h',day,'across all teams'],['Alerts, 24 h',al,'teams piling into one token']]
-    .map(([k,v,s])=>`<div class="kpi"><span>${k}</span><b>${v}</b><span>${s}</span></div>`).join('');
-  const u=D.meta.updated;$('#stamp').textContent=u?('Last scan '+ago(u)+' · scans every ~10 min'):'Waiting for the first scan';
-  $('#pulse').style.background=(u&&now()-u<1800)?'var(--green)':'var(--amber)';
-}
-function moves(){
-  const rows=D.moves.filter(pass).filter(m=>m.side!=='internal').filter(m=>hit(m.sym,m.ca,m.wallet,...(m.groups||[]).map(gname))).slice(0,400);
-  if(!rows.length)return `<div class="card"><div class="empty">No team trades yet in this view. New buys and sells show up here within about 10 minutes.</div></div>`;
-  return `<div class="card scroll"><table><thead><tr><th>When</th><th>Team</th><th>Side</th><th>Token</th><th class="n">Size</th><th class="n">Market cap</th><th>Wallet</th><th>Tx</th></tr></thead><tbody>${
-    rows.map(m=>`<tr><td class="ago">${ago(m.ts)}</td><td>${(m.groups||[]).slice(0,2).map(g=>esc(gname(g))).join('<br>')}<div class="chain">${m.chain}</div></td>
-    <td class="${m.side}">${m.side}</td><td>${tk(m.chain,m.ca,m.sym)}</td><td class="n">${usd(m.usd)}</td><td class="n">${usd(m.mc)}</td>
-    <td>${wl(m.chain,m.wallet)}</td><td><a class="faint" target="_blank" rel="noopener" href="${TX[m.chain]}${esc(m.tx)}">view</a></td></tr>`).join('')}</tbody></table></div>`;
-}
-function alerts(){
-  const rows=D.alerts.filter(pass).filter(a=>hit(a.sym,a.ca,a.group_name,...(a.group_names||[])));
-  if(!rows.length)return `<div class="card"><div class="empty">No alerts yet. An alert fires when 2+ wallets from one team, or 2+ different teams, buy the same token within 6 hours.</div></div>`;
-  return `<div class="card scroll"><table><thead><tr><th>Alert</th><th>Token</th><th>Who</th><th class="n">Bought</th><th class="n">MC at alert</th><th class="n">MC now</th><th class="n">Change</th></tr></thead><tbody>${
-    rows.map(a=>{const ch=(a.mc_now&&a.mc_at_alert)?(a.mc_now/a.mc_at_alert-1)*100:null;
-    return `<tr><td class="ago">${ago(a.first_alert)}<div class="chain">${a.chain}</div></td><td>${tk(a.chain,a.ca,a.sym)}</td>
-    <td>${a.kind==='group'?`${a.wallets} wallets of <b>${esc(a.group_name)}</b>`:`${a.n_groups} teams: ${esc((a.group_names||[]).join(', '))}`}</td>
-    <td class="n">${usd(a.usd)}</td><td class="n">${usd(a.mc_at_alert||a.mc)}</td><td class="n">${usd(a.mc_now)}</td>
-    <td class="n ${ch>0?'up':ch<0?'down':''}">${ch==null?'—':(ch>0?'+':'')+ch.toFixed(0)+'%'}</td></tr>`}).join('')}</tbody></table></div>`;
-}
-const ORDER={live:0,active:1,recent:2,quiet:3,dormant:4};
-function teams(){
-  const rows=D.groups.filter(pass).filter(g=>hit(g.name,g.id,g.why,...(g.wallets||[]).map(w=>w.w)))
-    .sort((a,b)=>(ORDER[a.status]-ORDER[b.status])||((b.last_ts||0)-(a.last_ts||0)));
-  return `<div class="card scroll"><table><thead><tr><th>Team</th><th>Status</th><th>Last move</th><th class="n">Wallets</th><th class="n">Winners early</th><th class="n">Buys 7 d</th></tr></thead><tbody>${
-    rows.map(g=>`<tr><td><details><summary><b>${esc(g.name)}</b> ${g.tier?`<span class="tag ${g.tier==='A'?'tierA':''}">tier ${esc(g.tier)}</span>`:''}<div class="chain">${g.chain} · ${esc(g.kind)}</div></summary>
-      <div class="muted" style="margin-top:6px">${esc(g.why)}</div><div class="wl">${(g.wallets||[]).map(w=>`<span class="tag">${wl(g.chain,w.w)}${w.role?' · '+esc(w.role):''}</span>`).join('')}</div></details></td>
-      <td><span class="tag st-${g.status}">${g.status}</span></td>
-      <td class="ago">${ago(g.last_ts)}${g.last_sym?`<div class="chain"><span class="${g.last_side}">${g.last_side}</span> ${esc(g.last_sym)}</div>`:''}</td>
-      <td class="n">${g.n||'—'}</td><td class="n">${g.winners??'—'}</td><td class="n">${g.buys_7d||0}</td></tr>`).join('')}</tbody></table></div>`;
-}
-function fresh(){
-  const rows=D.disc.filter(pass).filter(r=>hit(r.sym,r.ca,...(r.groups||[]).map(gname)));
-  if(!rows.length)return `<div class="card"><div class="empty">No new tokens past $500K in the last scans.</div></div>`;
-  return `<div class="card scroll"><table><thead><tr><th>Token</th><th>Launched</th><th class="n">Market cap</th><th class="n">Liquidity</th><th class="n">Volume 24 h</th><th>Our teams in it</th></tr></thead><tbody>${
-    rows.map(r=>`<tr><td>${tk(r.chain,r.ca,r.sym)}<div class="chain">${r.chain}</div></td><td class="ago">${ago(r.created)}</td>
-    <td class="n">${usd(r.mc)}</td><td class="n">${usd(r.liq)}</td><td class="n">${usd(r.vol24)}</td>
-    <td>${(r.groups||[]).length?r.groups.slice(0,3).map(g=>`<span class="tag tierA">${esc(gname(g))}</span>`).join(' '):(r.watched||[]).length?`${r.watched.length} watched wallets`:'<span class="faint">none seen</span>'}</td></tr>`).join('')}</tbody></table></div>`;
-}
-function about(){
-  const m=D.meta, r=(m.runs||[])[0]||{};
-  const cs=CH.map(c=>{const x=c==='Solana'?m.solana||{}:(m.chains||{})[c]||{};
-    return `<tr><td>${c}</td><td class="n">${x.wallets??'—'}</td><td class="ago">${ago(x.at)}</td><td class="muted">${c==='Solana'?(x.covered!=null?`${x.covered}/${x.of} wallets checked last pass`:''):(x.head?'block '+x.head:'')}</td></tr>`}).join('');
-  return `<div class="card"><table><thead><tr><th>Chain</th><th class="n">Wallets watched</th><th>Last checked</th><th>Notes</th></tr></thead><tbody>${cs}</tbody></table></div>
-  <div class="note"><b>How it works.</b> A free GitHub job runs about every 10 minutes. It reads every watched team wallet straight from each blockchain's public nodes, prices tokens with GeckoTerminal, and checks newly launched tokens that passed $500K. No computer of yours needs to be on. GitHub can delay scheduled runs at busy times.<br><br>
-  <b>Where the teams come from.</b> A one-off deep study of tokens that passed $500K on each chain: wallets that bought early together across several winners and rarely on failed launches, linked by same-second buys, matching sizes or shared funders.<br><br>
-  <b>Read with care.</b> "Buy" means the wallet received the token; transfers between wallets of the same team are hidden. Sizes are estimates at the scan's price. This is research, not financial advice.<br><br>
-  Last pass: ${r.secs??'—'} s, ${r.new_moves??0} new moves${(r.errors||[]).length?`; notes: ${esc(r.errors.join(' · '))}`:''}.</div>`;
+    ['Tokens teams bought in last 6h',hot],
+    ['Team buys in last 6h',b6.length+' · '+usd(b6.reduce((s,m)=>s+(m.usd||0),0))],
+    ['Teams active in last 24h',act.size+' of '+D.groups.filter(inChain).length],
+    ['Picks up since first team buy (3d)',b3.length?Math.round(100*upN/b3.length)+'% of '+b3.length:'—'],
+  ].map(([k,v])=>`<div class="kpi"><span>${k}</span><b>${v}</b></div>`).join('');
 }
 function render(){
-  chips();kpis();
-  $('#view').innerHTML=({moves,alerts,teams,new:fresh,about})[tab]();
+  $('#chips').innerHTML=CH.map(c=>`<button class="${c===chain?'on':''}" data-c="${c}">${c}</button>`).join('');
+  ({hot:vHot,best:vBest,feed:vFeed,teams:vTeams,alerts:vAlerts,new:vNew,how:vHow}[view])();
 }
-$('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.t;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));render()};
-$('#chips').onclick=e=>{const b=e.target.closest('button');if(!b)return;chain=b.dataset.c;render()};
-$('#q').oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
-load();setInterval(load,120000);setInterval(kpis,30000);
+function tokCard(h){
+  const ts=teamScore(h),lvl=ts>=4||(ts>=2&&h.n_wallets>=3)?3:ts>=2||h.n_wallets>=2||h.usd_6h>=1000?2:1;const nt=g6(h).length;
+  const lab=['','Warm','Hot','Very hot'][lvl];
+  return`<div class="tok ${lvl===3?'fire':''}">
+    <div class="top"><div><div class="sym">${esc(h.sym||'?')}</div><div class="chain">${h.chain} · ${ageTxt(h)} · <span class="mono">${short(h.ca)}</span></div></div><div style="text-align:right"><span class="heat h${lvl}">${lab}</span><div style="margin-top:4px">${stateTag(h)}</div></div></div>
+    <div class="what"><b>${nt} team${nt===1?'':'s'}</b> · ${h.n_wallets} wallet${h.n_wallets===1?'':'s'} bought <b>${usd(h.usd_6h)}</b> in the last 6h</div>
+    <div class="stats"><div><span>Market cap now</span><b>${usd(h.mc_now)}</b></div><div><span>Since 1st team buy</span><b>${pct(h.change)}</b></div><div><span>Last team buy</span><b>${ago(h.last_buy||h.last)}</b></div><div><span>Price 1h</span><b>${pct(h.ch1!=null?h.ch1/100:null)}</b></div><div><span>Price 6h</span><b>${pct(h.ch6!=null?h.ch6/100:null)}</b></div><div><span>Volume 24h</span><b>${usd(h.vol24)}</b></div></div>
+    <div class="teams">${g6(h).slice(0,4).map(teamChip).join('')}</div>
+    <div class="links"><a href="${gmgn(h.chain,h.ca)}" target="_blank" rel="noopener">GMGN</a><a href="${dex(h.chain,h.ca)}" target="_blank" rel="noopener">DexScreener</a><span class="faint">liq ${usd(h.liq)}</span></div>
+  </div>`;
+}
+function vHot(){
+  let rows=D.hot.filter(h=>inChain(h)&&h.buys_6h>0&&freshOK(h)&&match(h)).sort((a,b)=>heat(b)-heat(a));
+  $('#view').innerHTML=`<p class="lead">Tokens our teams are buying right now (last 6 hours), hottest first. Only buys count: by the time a team sells it is usually too late. By default you only see fresh tokens (launched in the last 3 days) that are not already dumping. "Very hot" means several proven teams are in at once; buys from unproven teams count for less.</p>`+freshBar()+
+    (rows.length?`<div class="grid">${rows.slice(0,60).map(tokCard).join('')}</div>`:`<div class="card empty">No team buys on fresh tokens in the last 6 hours${chain!=='All'?' on '+chain:''}. Try "Any age", or check "Best last 3 days".</div>`);
+}
+function vBest(){
+  let all=D.hot.filter(h=>inChain(h)&&h.change!=null&&freshOK(h)&&match(h));
+  const n=all.length,upN=all.filter(h=>h.change>0).length,s=[...all].map(h=>h.change).sort((a,b)=>a-b);
+  const med=n?s[Math.floor(n/2)]:null,dbl=all.filter(h=>h.change>=1).length;
+  let rows=[...all].sort((a,b)=>bestMode==='best'?b.change-a.change:a.change-b.change);
+  $('#view').innerHTML=`<p class="lead">Every token a team bought in the last 3 days, ranked by how far its market cap has moved since the first team buy. This is the honest scoreboard: the losers are shown too.</p>${freshBar()}
+  <div class="summary">
+    <div class="kpi"><span>Tokens tracked</span><b>${n}</b></div>
+    <div class="kpi"><span>Up since first team buy</span><b>${n?Math.round(100*upN/n)+'%':'—'}</b><div class="meter"><i style="width:${n?100*upN/n:0}%"></i></div></div>
+    <div class="kpi"><span>Median move</span><b>${pct(med)}</b></div>
+    <div class="kpi"><span>Doubled or better</span><b>${dbl}</b></div>
+  </div>
+  <div class="bar seg"><button data-b="best" class="${bestMode==='best'?'on':''}">Best first</button><button data-b="worst" class="${bestMode==='worst'?'on':''}">Worst first</button></div>
+  <div class="card scroll"><table><thead><tr><th>#</th><th>Token</th><th class="n">Since 1st team buy</th><th class="n">MC at 1st buy</th><th class="n">MC now</th><th class="hide-m">Who bought</th><th class="n hide-m">Team bought</th><th class="hide-m">First buy</th></tr></thead><tbody>
+  ${rows.slice(0,300).map((h,i)=>`<tr><td class="muted">${i+1}</td><td><a href="${gmgn(h.chain,h.ca)}" target="_blank" rel="noopener"><b>${esc(h.sym)}</b></a> ${stateTag(h)}<div class="chain">${h.chain} · ${ageTxt(h)}</div></td>
+    <td class="n"><b>${pct(h.change)}</b></td><td class="n">${usd(h.mc_first)}</td><td class="n">${usd(h.mc_now)}</td>
+    <td class="hide-m"><div class="teams">${(h.groups||[]).slice(0,3).map(teamChip).join('')}${h.n_groups>3?`<span class="tag">+${h.n_groups-3}</span>`:''}</div></td>
+    <td class="n hide-m"><span class="buy">${usd(h.buy_usd)}</span></td><td class="hide-m muted">${ago(h.first_buy)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">Nothing yet.</td></tr>'}
+  </tbody></table></div>`;
+}
+function vFeed(){
+  let rows=D.moves.filter(m=>inChain(m)&&m.side==='buy'&&match(m,m.wallet));
+  $('#view').innerHTML=`<p class="lead">Every buy by a team wallet, newest first, in plain words. Sells are left out on purpose.</p>
+  <div class="card scroll"><ul class="feed">${rows.slice(0,300).map(m=>{const g=(m.groups||[])[0];const gg=G()[g];
+    return`<li><span class="t">${ago(m.ts)}</span><span><span class="dot buy"></span><b>${esc(gg?gg.nick:'A watched wallet')}</b> <span class="muted">(${esc(gg?gg.style+(gg.grade?', '+gg.grade:''):'')})</span> bought <b>${usd(m.usd)}</b> of <a href="${gmgn(m.chain,m.ca)}" target="_blank" rel="noopener"><b>${esc(m.sym)}</b></a> on ${m.chain}${m.mc?` at ${usd(m.mc)} market cap`:''} <span class="faint mono">${short(m.wallet)}</span></span></li>`}).join('')||'<li class="empty">No buys yet.</li>'}</ul></div>`;
+}
+function vTeams(){
+  const t24=now()-86400;const act={};
+  D.moves.forEach(m=>{if(m.side!=='buy')return;(m.groups||[]).forEach(g=>{const a=act[g]||(act[g]={b24:0,u24:0,toks:new Set(),lb:null});if(!a.lb||m.ts>a.lb.ts)a.lb=m;if(m.ts>=t24){a.b24++;a.u24+=m.usd||0;a.toks.add(m.sym)}})});
+  const order={Elite:0,Strong:1,Tested:2,Decent:3,Unproven:4};
+  let rows=D.groups.filter(g=>inChain(g)&&(!q||((g.label||'')+' '+g.name+' '+g.id+' '+(g.wallets||[]).map(w=>w.w).join(' ')).toLowerCase().includes(q)))
+    .sort((a,b)=>((act[b.id]?.b24||0)-(act[a.id]?.b24||0))||((act[b.id]?.lb?.ts||0)-(act[a.id]?.lb?.ts||0))||((order[a.grade]??5)-(order[b.grade]??5)));
+  $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. Each team has a nickname so you can follow it, a style (how its wallets are linked) and a grade from its track record before we started watching. Tap a team to see its wallets.</p>
+  <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th class="n">Track record</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
+  ${rows.map(g=>{const a=act[g.id];return`<tr><td><details><summary><b>${esc(g.nick||g.name)}</b> <span class="muted">· ${esc(g.style||g.kind)}</span><div class="chain">${g.chain} · ${g.n} wallet${g.n===1?'':'s'} · <span class="tag st-${g.status}">${g.status}</span></div></summary>
+    <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div><div class="faint" style="font-size:12px;margin-top:4px">Research id ${esc(g.id)} · ${esc(g.research_name||g.name)}</div>
+    <div class="wl">${(g.wallets||[]).map(w=>`<a class="tag mono" href="https://gmgn.ai/${GM[g.chain]}/address/${w.w}" target="_blank" rel="noopener">${short(w.w)} · ${esc(w.role)}</a>`).join('')}</div></details></td>
+    <td><span class="tag g-${esc(g.grade||'')}">${esc(g.grade||'—')}</span></td>
+    <td class="n">${g.winners} wins / ${g.failed} misses<div class="chain">${g.profit>0?usd(g.profit)+' profit found':''}</div></td>
+    <td>${a?.lb?`<span class="buy">bought</span> <b>${esc(a.lb.sym)}</b>`:'<span class="faint">no buys seen yet</span>'}<div class="chain">${a?.lb?ago(a.lb.ts):''}</div></td>
+    <td class="n hide-m">${a?.b24||0}${a?.u24?`<div class="chain">${usd(a.u24)}</div>`:''}</td>
+    <td class="hide-m muted">${a?[...a.toks].slice(0,5).map(esc).join(', '):''}</td></tr>`}).join('')}
+  </tbody></table></div>`;
+}
+function vAlerts(){
+  let rows=D.alerts.filter(a=>inChain(a)&&freshOK(a)&&match(a,(a.group_names||[]).join(' ')+' '+(a.group_name||'')));
+  $('#view').innerHTML=`<p class="lead">Fired when two or more wallets from one team, or two or more different teams, buy the same token within 6 hours. These are the strongest signals the scanner produces. Tokens that are old or already dumping are hidden unless you switch them on.</p>${freshBar()}
+  <div class="card scroll"><table><thead><tr><th>When</th><th>Token</th><th>Why it fired</th><th class="n">MC at alert</th><th class="n">MC now</th><th class="n hide-m">Change</th></tr></thead><tbody>
+  ${rows.map(a=>`<tr><td class="muted">${ago(a.first_alert)}</td><td><a href="${gmgn(a.chain,a.ca)}" target="_blank" rel="noopener"><b>${esc(a.sym)}</b></a> ${stateTag(a)}<div class="chain">${a.chain} · ${ageTxt(a)}</div></td>
+    <td>${a.kind==='group'?`${a.wallets} wallets of ${teamChip(a.group)} bought together`:`${a.n_groups} different teams bought: ${(a.groups||[]).slice(0,4).map(teamChip).join(' ')}`}<div class="chain">${usd(a.usd)} total</div></td>
+    <td class="n">${usd(a.mc_at_alert||a.mc)}</td><td class="n">${usd(a.mc_now)}</td><td class="n hide-m">${pct(a.mc_now&&(a.mc_at_alert||a.mc)?a.mc_now/(a.mc_at_alert||a.mc)-1:null)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No alerts on fresh tokens right now. Try "Any age".</td></tr>'}
+  </tbody></table></div>`;
+}
+function vNew(){
+  let rows=D.disc.filter(r=>inChain(r)&&match(r));
+  $('#view').innerHTML=`<p class="lead">New tokens (under 3 days old) that passed $500K market cap, and whether any of our team wallets were in early.</p>
+  <div class="card scroll"><table><thead><tr><th>Token</th><th class="n">Market cap</th><th class="hide-m">Age</th><th>Our teams in?</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr><td><a href="${gmgn(r.chain,r.ca)}" target="_blank" rel="noopener"><b>${esc(r.sym)}</b></a><div class="chain">${r.chain}</div></td><td class="n">${usd(r.mc)}</td><td class="hide-m muted">${ago(r.created)}</td>
+    <td>${(r.groups||[]).length?`<div class="teams">${r.groups.slice(0,4).map(teamChip).join('')}</div>`:(r.watched||[]).length?`${r.watched.length} watched wallets`:'<span class="faint">none seen</span>'}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">None yet.</td></tr>'}
+  </tbody></table></div>`;
+}
+function vHow(){
+  $('#view').innerHTML=`<div class="note">
+  <p><b>What a "team" is.</b> A set of wallets we linked together from past launches: same funder, buying in the same second or minute, or repeatedly early on the same winners. Solo wallets that keep being early are included too.</p>
+  <p><b>Team names.</b> Each team gets a fixed nickname (like "Zinc Bees") so you can follow it across the page, plus a style:</p>
+  <p>· <b>Same-second snipers</b>: wallets that buy in the same second, so one person or bot runs them.<br>· <b>Same-minute crew</b>: wallets that keep hitting the same new tokens within a minute.<br>· <b>One-funder crew</b>: wallets funded by the same source wallet.<br>· <b>Wallet farm</b>: many fresh wallets from one funder, made to look like different buyers.<br>· <b>Launch team</b>: wallets tied to the token creator.<br>· <b>Insider team / Linked cluster</b>: wallets linked by repeated early co-buys.<br>· <b>Solo insider / Smart early buyer</b>: one wallet with a strong early-entry record.</p>
+  <p><b>Grades</b> come from the track record we measured before watching: <span class="tag g-Elite">Elite</span> 10+ winners and 75%+ hit rate · <span class="tag g-Strong">Strong</span> 5+ winners and 60%+ · <span class="tag g-Decent">Decent</span> 3+ winners · <span class="tag">Unproven</span> fewer.</p>
+  <p><b>Token status.</b> <span class="tag up">Fresh</span> launched in the last 24h · <span class="tag up">Running</span> price up 10%+ in 1h or 25%+ in 6h · <span class="tag down">Fading</span> down 35%+ in 6h, 60%+ in 24h, or 60%+ below the highest market cap we saw · <span class="tag">Young</span> 1 to 3 days old, steady · <span class="tag faint">Older</span> everything else. Fading tokens and tokens older than 3 days are hidden by default.</p>
+  <p><b>Buys only.</b> The page shows what teams are buying. Sells are left out because by the time a team sells, it is usually too late to act.</p>
+  <p><b>Hot now</b> ranks tokens by how many separate teams and wallets bought in the last 6 hours, and how much they spent. <b>Best last 3 days</b> compares market cap now with market cap at the first team buy.</p>
+  <p><b>Be careful.</b> When we tested copying these teams, most of the profit was gone by the time a copier could get in, and fees ate the rest. Teams also sell fast. Use this to find tokens worth a look, then do your own checks.</p>
+  <p class="faint">Data: public blockchain nodes and GeckoTerminal, scanned every few minutes by a free GitHub Action. Nothing here is financial advice.</p></div>`;
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.v){view=b.dataset.v;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));render()}
+  else if(b.dataset.c){chain=b.dataset.c;kpis();render()}
+  else if(b.dataset.b){bestMode=b.dataset.b;render()}
+  else if(b.dataset.a){age=b.dataset.a;render()}
+  else if(b.dataset.x){fading=!fading;render()}});
+$('#q').addEventListener('input',e=>{q=e.target.value.trim().toLowerCase();render()});
+load();setInterval(load,120000);
 </script>
 </body>
 </html>
