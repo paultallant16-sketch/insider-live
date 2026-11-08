@@ -27,10 +27,10 @@ jobs:
           end=$(( $(date +%s) + 5*3600 + 1800 ))
           while [ "$(date +%s)" -lt "$end" ]; do
             python scanner/scan.py || true
-            git add data docs/data
+            git add -- data docs/data ':(exclude)*.tmp'
             if ! git diff --cached --quiet; then
               git commit -m "scan $(date -u +'%Y-%m-%d %H:%M')" -q
-              for i in 1 2 3; do (git pull --rebase -q -X ours || { git rebase --abort; false; }) && git push -q && break; sleep 5; done
+              for i in 1 2 3; do (git pull --rebase -q -X theirs || { git rebase --abort; false; }) && git push -q && break; sleep 5; done
             fi
             sleep 15
           done
