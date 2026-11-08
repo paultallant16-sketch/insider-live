@@ -20,7 +20,7 @@ NOW = int(time.time())
 KEEP_DAYS = 7
 ERRORS = []
 
-TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f179163c4a11628f55a4df523f'
+TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 EVM = {
     'BSC':       dict(gt='bsc', block_s=0.75, max_range=2000, back=2400,
                       rpcs=['https://bsc-rpc.publicnode.com', 'https://bsc.drpc.org', 'https://binance.llamarpc.com']),
@@ -387,16 +387,17 @@ def bsc_contracts(st, moves, chain='BSC'):
 
 
 # ---------------------------------------------------------------- Solana
-def scan_solana(wallets, st, newmoves):
+def scan_solana(wallets, st, newmoves, priority=()):
     if not wallets:
         return
     rpc = RPC('Solana', SOL_RPCS, gap=0.13)
     cur = st.setdefault('sol', {})
     last = cur.setdefault('last', {})
-    order = sorted(wallets)
-    pos = cur.get('pos', 0) % len(order)
-    order = order[pos:] + order[:pos]
-    done = 0
+    pri = [w for w in sorted(set(priority)) if w in set(wallets)]
+    rest = sorted(set(wallets) - set(pri))
+    pos = cur.get('pos', 0) % max(1, len(rest))
+    order = pri + rest[pos:] + rest[:pos]        # proven wallets first, every pass
+    done = fails = rest_done = 0
     for w in order:
         if left() < 90:
             break
@@ -408,20 +409,34 @@ def scan_solana(wallets, st, newmoves):
                 params['limit'] = 3      # first sight: only the latest few
             sigs = rpc.call('getSignaturesForAddress', [w, params]) or []
         except Exception as e:
-            ERRORS.append(f'Solana sigs: {str(e)[:80]}')
-            break
+            msg = str(e)
+            if '-32020' in msg or 'Transaction' in msg:
+                last.pop(w, None)        # bookmark too old for this node: restart this wallet from its latest
+                continue
+            fails += 1
+            if fails == 1:
+                ERRORS.append(f'Solana sigs: {msg[:80]}')
+            if fails >= 6:
+                break
+            time.sleep(3)
+            continue
         done += 1
+        if w not in pri:
+            rest_done += 1
         if not sigs:
             continue
-        last[w] = sigs[0]['signature']
-        for s in reversed(sigs):
-            if s.get('err') or left() < 60:
+        for s in reversed(sigs):                 # oldest first; the bookmark only moves past what we read
+            if left() < 60:
+                break
+            if s.get('err'):
+                last[w] = s['signature']
                 continue
             try:
                 tx = rpc.call('getTransaction', [s['signature'], {'encoding': 'jsonParsed',
                                                                    'maxSupportedTransactionVersion': 0}])
             except Exception:
-                continue
+                break                            # retry this one next pass
+            last[w] = s['signature']
             if not tx or not tx.get('meta'):
                 continue
             m = tx['meta']
@@ -445,7 +460,7 @@ def scan_solana(wallets, st, newmoves):
                     continue
                 newmoves.append(dict(chain='Solana', wallet=w, ts=ts, side='buy' if delta > 0 else 'sell',
                                      ca=mint, amount=abs(delta), sol=sol_delta, tx=s['signature']))
-    cur['pos'] = (pos + done) % len(order)
+    cur['pos'] = (pos + rest_done) % max(1, len(rest))
     cur['covered'] = done
     cur['of'] = len(order)
     cur['at'] = NOW
@@ -568,6 +583,33 @@ def label_groups(groups):
     return groups
 
 
+# ---------------------------------------------------------------- phone alerts (ntfy.sh, free, no account)
+GMGN_NET = {'Solana': 'sol', 'Robinhood': 'robinhood', 'BSC': 'bsc', 'Base': 'base', 'Ethereum': 'eth'}
+
+
+def notify(rows, gmap):
+    topic = os.environ.get('NTFY_TOPIC', '').strip()
+    for r in rows:
+        if r.get('notified'):
+            continue
+        r['notified'] = True
+        if not topic or NOW - r['first_signal'] > 1800:
+            continue
+        names = ', '.join(gmap[g].get('nick', g) + (' *' if gmap[g].get('legit') else '') for g in r['teams'][:3] if g in gmap)
+        age = r.get('age_at_signal_h') or 0
+        age_txt = f"{int(age * 60)}m old" if age < 1 else f"{age:.0f}h old"
+        mc = r.get('mc_at_signal') or 0
+        body = (f"{r['n_teams']} proven team(s), {r['n_wallets']} wallet(s) bought ${r['buy_usd']:,.0f} "
+                f"in {r['sym']} on {r['chain']} ({age_txt}, MC ${mc:,.0f}). {names}")
+        try:
+            req = urllib.request.Request(f'https://ntfy.sh/{topic}', data=body.encode('utf-8'), headers={
+                'Title': f"BUY SIGNAL {r['sym']} ({r['chain']})", 'Tags': 'rotating_light',
+                'Click': f"https://gmgn.ai/{GMGN_NET.get(r['chain'], r['chain'])}/token/{r['ca']}", 'Priority': '4'})
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception as e:
+            ERRORS.append(f'ntfy: {type(e).__name__}')
+
+
 # ---------------------------------------------------------------- seed
 ROLE = {'l': 'leader', 'm': 'member', 'f': 'funder', 's': 'solo', 'd': 'deployer'}
 
@@ -607,14 +649,19 @@ def main():
     disc = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'discovery.json'), {}).get('rows', [])}
 
     newmoves = []
-    chains_order = ['BSC', 'Robinhood', 'Base', 'Ethereum', 'Solana']
+    # proven = graded Elite/Strong/Tested or early on a lasting token; these drive buy signals
+    good_ids = {g['id'] for g in groups if g['grade'] in ('Elite', 'Strong', 'Tested') or g.get('legit')}
+    proven = {}
+    for chain, ws in watch.items():
+        proven[chain] = {w for w, gids in ws.items() if any(x in good_ids for x in gids)}
+    chains_order = ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']
     for chain in chains_order:
         if left() < 120:
             ERRORS.append(f'{chain}: skipped this pass (time budget)')
             continue
         try:
             if chain == 'Solana':
-                scan_solana(list(watch.get('Solana', {})), st, newmoves)
+                scan_solana(list(watch.get('Solana', {})), st, newmoves, priority=proven.get('Solana', ()))
             elif chain in BLOCKSCOUT:
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
             elif chain in ('BSC', 'Base'):
@@ -656,8 +703,8 @@ def main():
             usd = None
         if usd is None and amount is not None and info.get('price'):
             usd = amount * info['price']
-        if usd is not None and usd < 5:
-            continue                       # dust, spam airdrops and rounding noise
+        if usd is None or usd < 5:
+            continue                       # dust, unpriced airdrop spam and rounding noise
         gids = watch.get(m['chain'], {}).get(m['wallet'] if m['chain'] == 'Solana' else m['wallet'].lower()) \
             or watch.get(m['chain'], {}).get(m['wallet'], [])
         moves.append(dict(chain=m['chain'], wallet=m['wallet'], groups=gids, ts=m['ts'], side=m['side'],
@@ -696,7 +743,7 @@ def main():
     win = NOW - 6 * 3600
     buys = {}
     for m in moves:
-        if m['side'] != 'buy' or m['ts'] < win:
+        if m['side'] != 'buy' or m['ts'] < win or (m.get('usd') or 0) < 50:
             continue
         b = buys.setdefault((m['chain'], m['ca']), dict(sym=m['sym'], mc=m['mc'], by={}, usd=0, first=m['ts']))
         for g in m['groups']:
@@ -706,6 +753,8 @@ def main():
     akeys = {(a['chain'], a['ca'], a['kind'], a.get('group', '')): a for a in alerts}
     for (chain, ca), b in buys.items():
         multi = [g for g, ws in b['by'].items()]
+        if len(set().union(*b['by'].values())) < 2:
+            multi = []                     # one wallet sitting in two overlapping teams is not two teams
         for g, ws in b['by'].items():
             if len(ws) >= 2:
                 k = (chain, ca, 'group', g)
@@ -781,6 +830,71 @@ def main():
                           groups_6h=sorted(h['groups_6h'])[:12], **token_extra(info)))
     hrows.sort(key=lambda r: -(r['last_buy'] or 0))
 
+    # buy signals: proven teams putting real money into a fresh launch, not dust and not exits
+    sigs = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'signals.json'), {}).get('rows', [])}
+    win2 = NOW - 2 * 3600
+    cand = {}
+    for m in moves:
+        if m['ts'] < win2 or m['side'] == 'internal':
+            continue
+        if not any(g in good_ids for g in m['groups']):
+            continue
+        k = f"{m['chain']}|{m['ca']}"
+        c = cand.setdefault(k, dict(chain=m['chain'], ca=m['ca'], sym=m['sym'], buy=0.0, sell=0.0, wallets=set(),
+                                    teams=set(), first=m['ts'], big=0.0))
+        usd = m.get('usd') or 0
+        if m['side'] == 'buy':
+            if usd < 50:
+                continue                              # dust
+            c['buy'] += usd
+            c['big'] = max(c['big'], usd)
+            c['wallets'].add(m['wallet'])
+            c['teams'].update(g for g in m['groups'] if g in good_ids)
+            c['first'] = min(c['first'], m['ts'])
+        else:
+            c['sell'] += usd
+    need = {}
+    for c in cand.values():
+        need.setdefault(c['chain'], []).append(c['ca'])
+    for chain, lst in need.items():
+        if left() > 45:
+            token_info(chain, lst[:60], tokens)       # fresh price change and age before judging
+    for k, c in cand.items():
+        info = tokens.get(k) or {}
+        state, age_h = token_state(info)
+        if age_h is None or age_h > 24 or state == 'fading':
+            continue
+        strong = (c['buy'] >= 300 and len(c['wallets']) >= 2) or c['big'] >= 500
+        if not strong or c['sell'] > 0.5 * c['buy']:
+            continue
+        r = sigs.get(k)
+        if not r:
+            r = dict(chain=c['chain'], ca=c['ca'], first_signal=NOW, mc_at_signal=info.get('mc'),
+                     age_at_signal_h=round(age_h, 2), first_buy=c['first'], notified=False)
+            sigs[k] = r
+        r.update(sym=info.get('sym') or c['sym'], buy_usd=round(c['buy'], 2), sell_usd=round(c['sell'], 2),
+                 n_wallets=len(c['wallets']), teams=sorted(c['teams'])[:8], n_teams=len(c['teams']),
+                 biggest=round(c['big'], 2), last_seen=NOW)
+    cas = {}
+    for r in sigs.values():
+        if NOW - r['first_signal'] < 3 * 86400:
+            cas.setdefault(r['chain'], []).append(r['ca'])
+    for chain, lst in cas.items():
+        if left() > 40:
+            token_info(chain, lst[:60], tokens)
+    for k, r in sigs.items():
+        info = tokens.get(k) or {}
+        if info.get('mc'):
+            r['mc_now'] = info['mc']
+            r['peak_mc'] = max(r.get('peak_mc') or 0, info['mc'])
+            if r.get('mc_at_signal'):
+                r['change'] = round(info['mc'] / r['mc_at_signal'] - 1, 4)
+                r['peak_change'] = round(r['peak_mc'] / r['mc_at_signal'] - 1, 4)
+        r.update({kk: v for kk, v in token_extra(info).items() if kk in ('state', 'age_h', 'ch1', 'ch6', 'liq')} if info else {})
+        r['liq'] = info.get('liq')
+    srows = sorted((r for r in sigs.values() if NOW - r['first_signal'] < 7 * 86400), key=lambda r: -r['first_signal'])
+    notify(srows, {g['id']: g for g in groups})
+
     # discovery: new tokens past $500K, and whether watched wallets are in
     watch_set = {}
     for chain, ws in watch.items():
@@ -817,6 +931,7 @@ def main():
     save(os.path.join(OUT, 'groups.json'), dict(updated=NOW, rows=out_groups))
     save(os.path.join(OUT, 'alerts.json'), dict(updated=NOW, rows=alerts[:500]))
     save(os.path.join(OUT, 'hot.json'), dict(updated=NOW, rows=hrows[:800]))
+    save(os.path.join(OUT, 'signals.json'), dict(updated=NOW, rows=srows[:400]))
     save(os.path.join(OUT, 'discovery.json'), dict(updated=NOW, rows=drows[:400]))
     save(os.path.join(OUT, 'meta.json'), meta)
     save(os.path.join(DATA, 'state.json'), st)
