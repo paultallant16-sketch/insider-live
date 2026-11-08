@@ -19,7 +19,8 @@ jobs:
           python-version: '3.12'
       - name: Scan all chains on a loop (about 5.5 hours per job)
         env:
-          RUN_BUDGET: '420'
+          RUN_BUDGET: '360'
+          NTFY_TOPIC: 'insider-live-49ab55a62a52'
         run: |
           git config user.name  "insider-live-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -29,7 +30,7 @@ jobs:
             git add data docs/data
             if ! git diff --cached --quiet; then
               git commit -m "scan $(date -u +'%Y-%m-%d %H:%M')" -q
-              for i in 1 2 3; do git pull --rebase -q -X ours && git push -q && break; sleep 5; done
+              for i in 1 2 3; do (git pull --rebase -q -X ours || { git rebase --abort; false; }) && git push -q && break; sleep 5; done
             fi
-            sleep 60
+            sleep 15
           done
