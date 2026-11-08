@@ -36,9 +36,10 @@ GT_NET = {'Solana': 'solana', 'BSC': 'bsc', 'Base': 'base', 'Ethereum': 'eth', '
 # quote / base assets: a transfer of these is money moving, not a token pick
 BASE_SYMBOLS = {'WETH', 'ETH', 'WBNB', 'BNB', 'USDC', 'USDT', 'DAI', 'BUSD', 'FDUSD', 'USD1', 'USDE', 'TUSD',
                 'WSOL', 'SOL', 'WBTC', 'CBBTC', 'BTCB', 'USDC.E', 'USDBC', 'PYUSD', 'STETH', 'WSTETH', 'CBETH'}
-SOL_BASE_MINTS = {'So11111111111111111111111111111111111111112',
-                  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-                  'Es9vMFrzaCERmJfrF8KAQoQGyFw53xcjjZzdKgcqfTsQ'}
+WSOL = 'So11111111111111111111111111111111111111112'
+STABLES = {'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF8KAQoQGyFw53xcjjZzdKgcqfTsQ'}
+SOL_BASE_MINTS = {WSOL} | STABLES
+SCAN_RESERVE = 110      # seconds kept back after the chain scans for prices, alerts, signals and discovery
 
 
 def left():
@@ -133,7 +134,7 @@ class GT:
                 return http(cls.base + path)
             except urllib.error.HTTPError as e:
                 if e.code == 429:
-                    time.sleep(10 * (k + 1))
+                    time.sleep(max(0, min(10 * (k + 1), left() - 30)))
                     continue
                 if e.code == 404:
                     return None
@@ -148,7 +149,8 @@ class GT:
 def token_info(chain, addrs, cache):
     """Fill cache[(chain, addr)] with symbol/decimals/price/mc. Refreshes prices for the given tokens."""
     net = GT_NET[chain]
-    addrs = [a for a in dict.fromkeys(addrs) if a]
+    addrs = [a for a in dict.fromkeys(addrs) if a and
+             (cache.get(f'{chain}|{a if chain == "Solana" else a.lower()}') or {}).get('at') != NOW]   # once per pass
     for i in range(0, len(addrs), 30):
         if left() < 25:
             break
@@ -216,6 +218,9 @@ def topic(addr):
 def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
     if not wallets:
         return
+    if contracts is not None and not contracts:
+        ERRORS.append(f'{chain}: no candidate contracts this pass')
+        return                  # never move the cursor past blocks we did not look at
     rpc = RPC(chain, cfg['rpcs'], gap=0.12)
     cur = st.setdefault('evm', {}).setdefault(chain, {})
     try:
@@ -238,8 +243,8 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
     rng = cur.get('range', cfg['max_range'])
     logs = []
     b = start
-    t_end = time.time() + 100      # per-chain cap so one slow chain cannot starve the rest
-    while b <= head and left() > 60 and time.time() < t_end:
+    t_end = time.time() + min(100, max(20, (left() - SCAN_RESERVE) / 3))   # per-chain cap
+    while b <= head and left() > SCAN_RESERVE and time.time() < t_end:
         e = min(head, b + rng - 1)
         try:
             got = []
@@ -258,7 +263,8 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
             if rng < cfg['max_range']:
                 rng = min(cfg['max_range'], rng * 2)
         except Exception as ex:
-            if rng > 20:
+            msg = str(ex).lower()
+            if rng > 20 and any(x in msg for x in ('range', 'too many', 'exceed', 'large', 'limit', 'results')):
                 rng = max(20, rng // 4)
                 continue
             ERRORS.append(f'{chain} getLogs: {str(ex)[:100]}')
@@ -278,9 +284,10 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
         t_lo = NOW - int((blocks[-1] - blocks[0]) * cfg['block_s'])
     span = max(1, blocks[-1] - blocks[0])
     seen = set()
+    agg = {}
     for l in logs:
-        if len(l.get('topics', [])) < 3:
-            continue            # ERC-721 style or malformed
+        if len(l.get('topics', [])) != 3:
+            continue            # ERC-721 (4 topics) or malformed
         key = (l['transactionHash'], l.get('logIndex'))
         if key in seen:
             continue
@@ -302,8 +309,13 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
             side, w = 'sell', frm
         else:
             continue
-        newmoves.append(dict(chain=chain, wallet=w, ts=ts, side=side, ca=tok, raw=str(raw),
-                             tx=l['transactionHash'], cp=frm if side == 'buy' else to))
+        k = (l['transactionHash'], w, tok, side)       # split routes / tax tokens: add the legs together
+        if k in agg:
+            agg[k]['raw'] = str(int(agg[k]['raw']) + raw)
+        else:
+            agg[k] = dict(chain=chain, wallet=w, ts=ts, side=side, ca=tok, raw=str(raw),
+                          tx=l['transactionHash'], cp=frm if side == 'buy' else to)
+    newmoves.extend(agg.values())
 
 
 # ---------------------------------------------------------------- Blockscout (per wallet, no key)
@@ -315,9 +327,10 @@ def scan_blockscout(chain, wallets, st, newmoves):
     cur = st.setdefault('bs', {}).setdefault(chain, {})
     last = cur.setdefault('last', {})
     wset = set(wallets)
-    done = 0
+    done = fails = 0
+    t_end = time.time() + min(100, max(20, (left() - SCAN_RESERVE) / 2))
     for w in sorted(wallets):
-        if left() < 90:
+        if left() < SCAN_RESERVE or time.time() > t_end or fails >= 5:
             break
         try:
             try:
@@ -328,12 +341,15 @@ def scan_blockscout(chain, wallets, st, newmoves):
                 time.sleep(5)
                 r = http(f'{host}/api/v2/addresses/{w}/token-transfers?type=ERC-20', timeout=20)
         except Exception as e:
-            ERRORS.append(f'{chain} blockscout: {getattr(e, "code", type(e).__name__)}')
+            fails += 1
+            if fails == 1:
+                ERRORS.append(f'{chain} blockscout: {getattr(e, "code", type(e).__name__)}')
             time.sleep(1)
             continue
         done += 1
         since = last.get(w, NOW - 3 * 3600)
         newest = since
+        agg = {}
         for it in (r or {}).get('items', []):
             try:
                 ts = int(dt.datetime.fromisoformat(it['timestamp'].replace('Z', '+00:00')).timestamp())
@@ -355,8 +371,17 @@ def scan_blockscout(chain, wallets, st, newmoves):
                 side, ww = 'sell', w
             else:
                 continue
-            newmoves.append(dict(chain=chain, wallet=ww, ts=ts, side=side, ca=tok, raw=str(raw),
-                                 tx=it.get('transaction_hash') or it.get('tx_hash') or ''))
+            tx = it.get('transaction_hash') or it.get('tx_hash') or ''
+            k = (tx, ww, tok, side)
+            try:
+                rv = int(raw)
+            except Exception:
+                rv = 0
+            if k in agg:
+                agg[k]['raw'] = str(int(agg[k]['raw']) + rv)
+            else:
+                agg[k] = dict(chain=chain, wallet=ww, ts=ts, side=side, ca=tok, raw=str(rv), tx=tx)
+        newmoves.extend(agg.values())
         last[w] = newest
         time.sleep(1.0)
     cur['covered'] = done
@@ -380,37 +405,50 @@ def bsc_contracts(st, moves, chain='BSC'):
             if base:
                 cas.append(base.split('_', 1)[-1].lower())
     key = f'{chain.lower()}_contracts'
-    cas = [m['ca'] for m in moves if m['chain'] == chain] + cas + st.get(key, [])[:40]
-    cas = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:120]
+    fresh = list(dict.fromkeys(c for c in cas if c.startswith('0x')))[:60]
+    moved = list(dict.fromkeys(m['ca'] for m in sorted(moves, key=lambda m: -m['ts']) if m['chain'] == chain))
+    cas = list(dict.fromkeys(fresh + moved[:40] + st.get(key, [])))[:120]
     st[key] = cas
     return cas
 
 
 # ---------------------------------------------------------------- Solana
-def scan_solana(wallets, st, newmoves, priority=()):
+def scan_solana(wallets, st, newmoves, priority=(), deadline=None):
+    """Proven wallets first, then a rotating slice of the rest. Each trade is valued from the money that
+    actually left or entered the wallet (native SOL + WSOL, or USDC/USDT), and transfers between two watched
+    wallets are marked internal so a funder topping up its crew is never read as buying."""
     if not wallets:
         return
-    rpc = RPC('Solana', SOL_RPCS, gap=0.13)
+    deadline = deadline or (time.time() + left())
+    rpc = RPC('Solana', SOL_RPCS, gap=0.2)
     cur = st.setdefault('sol', {})
     last = cur.setdefault('last', {})
-    pri = [w for w in sorted(set(priority)) if w in set(wallets)]
-    rest = sorted(set(wallets) - set(pri))
+    wset = set(wallets)
+    pri = [w for w in sorted(set(priority)) if w in wset]
+    rest = sorted(wset - set(pri))
     pos = cur.get('pos', 0) % max(1, len(rest))
     order = pri + rest[pos:] + rest[:pos]        # proven wallets first, every pass
     done = fails = rest_done = 0
     for w in order:
-        if left() < 90:
+        if left() < 90 or time.time() > deadline:
             break
         try:
-            params = {'limit': 25}
             if last.get(w):
-                params['until'] = last[w]
+                sigs, before = [], None          # page back to the bookmark so busy wallets lose nothing
+                while True:
+                    p = {'limit': 100, 'until': last[w]}
+                    if before:
+                        p['before'] = before
+                    page = rpc.call('getSignaturesForAddress', [w, p]) or []
+                    sigs += page
+                    if len(page) < 100 or len(sigs) >= 300:
+                        break
+                    before = page[-1]['signature']
             else:
-                params['limit'] = 3      # first sight: only the latest few
-            sigs = rpc.call('getSignaturesForAddress', [w, params]) or []
+                sigs = rpc.call('getSignaturesForAddress', [w, {'limit': 3}]) or []   # first sight: latest few
         except Exception as e:
             msg = str(e)
-            if '-32020' in msg or 'Transaction' in msg:
+            if '-32020' in msg:
                 last.pop(w, None)        # bookmark too old for this node: restart this wallet from its latest
                 continue
             fails += 1
@@ -423,10 +461,8 @@ def scan_solana(wallets, st, newmoves, priority=()):
         done += 1
         if w not in pri:
             rest_done += 1
-        if not sigs:
-            continue
         for s in reversed(sigs):                 # oldest first; the bookmark only moves past what we read
-            if left() < 60:
+            if left() < 60 or time.time() > deadline + 15:
                 break
             if s.get('err'):
                 last[w] = s['signature']
@@ -436,18 +472,19 @@ def scan_solana(wallets, st, newmoves, priority=()):
                                                                    'maxSupportedTransactionVersion': 0}])
             except Exception:
                 break                            # retry this one next pass
-            last[w] = s['signature']
             if not tx or not tx.get('meta'):
-                continue
+                break                            # node has not got it yet; retry next pass
+            last[w] = s['signature']
             m = tx['meta']
             ts = tx.get('blockTime') or NOW
-            d = {}
-            for side, arr in ((-1, m.get('preTokenBalances') or []), (1, m.get('postTokenBalances') or [])):
+            own = {}                             # (owner, mint) -> balance change, for every watched owner
+            for sgn, arr in ((-1, m.get('preTokenBalances') or []), (1, m.get('postTokenBalances') or [])):
                 for b in arr:
-                    if b.get('owner') != w:
-                        continue
-                    amt = _f((b.get('uiTokenAmount') or {}).get('uiAmountString')) or 0.0
-                    d[b['mint']] = d.get(b['mint'], 0.0) + side * amt
+                    o = b.get('owner')
+                    if o in wset:
+                        amt = _f((b.get('uiTokenAmount') or {}).get('uiAmountString')) or 0.0
+                        own[(o, b['mint'])] = own.get((o, b['mint']), 0.0) + sgn * amt
+            d = {mint: v for (o, mint), v in own.items() if o == w}
             sol_delta = 0.0
             try:
                 keys = [k['pubkey'] if isinstance(k, dict) else k for k in tx['transaction']['message']['accountKeys']]
@@ -455,11 +492,17 @@ def scan_solana(wallets, st, newmoves, priority=()):
                 sol_delta = (m['postBalances'][i] - m['preBalances'][i]) / 1e9
             except Exception:
                 pass
-            for mint, delta in d.items():
-                if mint in SOL_BASE_MINTS or abs(delta) < 1e-12:
-                    continue
-                newmoves.append(dict(chain='Solana', wallet=w, ts=ts, side='buy' if delta > 0 else 'sell',
-                                     ca=mint, amount=abs(delta), sol=sol_delta, tx=s['signature']))
+            picks = [k for k, v in d.items() if k not in SOL_BASE_MINTS and abs(v) > 1e-12]
+            one = len(picks) == 1                # only value a plain one-token swap
+            base_sol = sol_delta + d.get(WSOL, 0.0)
+            base_usd = sum(d.get(k, 0.0) for k in STABLES)
+            for mint in picks:
+                delta = d[mint]
+                opp = any(o != w and mm == mint and v * delta < 0 for (o, mm), v in own.items())
+                side = 'internal' if opp else ('buy' if delta > 0 else 'sell')
+                newmoves.append(dict(chain='Solana', wallet=w, ts=ts, side=side, ca=mint, amount=abs(delta),
+                                     sol=base_sol if one else 0.0, stable=base_usd if one else 0.0,
+                                     tx=s['signature']))
     cur['pos'] = (pos + rest_done) % max(1, len(rest))
     cur['covered'] = done
     cur['of'] = len(order)
@@ -494,7 +537,7 @@ def discover(chain, watch_set, disc):
             ca = ca.lower()
         key = f'{chain}|{ca}'
         row = disc.get(key) or dict(chain=chain, ca=ca, first_seen=NOW, watched=[])
-        row.update(sym=(a.get('name') or '?').split(' / ')[0][:24], pool=a.get('address'), created=cts,
+        row.update(sym=html.unescape((a.get('name') or '?').split(' / ')[0])[:24], pool=a.get('address'), created=cts,
                    mc=mc, ath=max(mc, row.get('ath') or 0), liq=_f(a.get('reserve_in_usd')),
                    vol24=_f((a.get('volume_usd') or {}).get('h24')), seen=NOW)
         disc[key] = row
@@ -590,10 +633,10 @@ GMGN_NET = {'Solana': 'sol', 'Robinhood': 'robinhood', 'BSC': 'bsc', 'Base': 'ba
 def notify(rows, gmap):
     topic = os.environ.get('NTFY_TOPIC', 'insider-live-49ab55a62a52').strip()
     for r in rows:
-        if r.get('notified'):
+        if r.get('notified') or not topic:
             continue
-        r['notified'] = True
-        if not topic or NOW - r['first_signal'] > 1800:
+        if NOW - r['first_signal'] > 1800:
+            r['notified'] = True             # too old to be useful on a phone
             continue
         names = ', '.join(gmap[g].get('nick', g) + (' *' if gmap[g].get('legit') else '') for g in r['teams'][:3] if g in gmap)
         age = r.get('age_at_signal_h') or 0
@@ -601,17 +644,20 @@ def notify(rows, gmap):
         mc = r.get('mc_at_signal') or 0
         body = (f"{r['n_teams']} proven team(s), {r['n_wallets']} wallet(s) bought ${r['buy_usd']:,.0f} "
                 f"in {r['sym']} on {r['chain']} ({age_txt}, MC ${mc:,.0f}). {names}")
-        try:
-            req = urllib.request.Request(f'https://ntfy.sh/{topic}', data=body.encode('utf-8'), headers={
-                'Title': f"BUY SIGNAL {r['sym']} ({r['chain']})", 'Tags': 'rotating_light',
-                'Click': f"https://gmgn.ai/{GMGN_NET.get(r['chain'], r['chain'])}/token/{r['ca']}", 'Priority': '4'})
+        payload = dict(topic=topic, title=f"BUY SIGNAL {r['sym']} ({r['chain']})", message=body,
+                       tags=['rotating_light'], priority=4,
+                       click=f"https://gmgn.ai/{GMGN_NET.get(r['chain'], r['chain'])}/token/{r['ca']}")
+        try:                                  # JSON body: emoji / Chinese names are fine, unlike HTTP headers
+            req = urllib.request.Request('https://ntfy.sh/', data=json.dumps(payload).encode('utf-8'),
+                                         headers={'Content-Type': 'application/json', 'User-Agent': UA})
             urllib.request.urlopen(req, timeout=10).read()
+            r['notified'] = True              # only once it really went out; otherwise retried next pass
         except Exception as e:
             ERRORS.append(f'ntfy: {type(e).__name__}')
 
 
 # ---------------------------------------------------------------- seed
-ROLE = {'l': 'leader', 'm': 'member', 'f': 'funder', 's': 'solo', 'd': 'deployer'}
+ROLE = {'l': 'leader', 'm': 'member', 'f': 'funder', 's': 'solo', 'd': 'deployer', 'p': 'pre-pump buyer'}
 
 
 def load_seed():
@@ -655,13 +701,15 @@ def main():
     for chain, ws in watch.items():
         proven[chain] = {w for w, gids in ws.items() if any(x in good_ids for x in gids)}
     chains_order = ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']
+    sol_deadline = time.time() + 0.40 * (left() - SCAN_RESERVE)    # Solana may not starve the EVM chains
     for chain in chains_order:
-        if left() < 120:
+        if left() < SCAN_RESERVE + 20:
             ERRORS.append(f'{chain}: skipped this pass (time budget)')
             continue
         try:
             if chain == 'Solana':
-                scan_solana(list(watch.get('Solana', {})), st, newmoves, priority=proven.get('Solana', ()))
+                scan_solana(list(watch.get('Solana', {})), st, newmoves, priority=proven.get('Solana', ()),
+                            deadline=sol_deadline)
             elif chain in BLOCKSCOUT:
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
             elif chain in ('BSC', 'Base'):
@@ -672,6 +720,8 @@ def main():
         except Exception as e:
             ERRORS.append(f'{chain}: {type(e).__name__} {str(e)[:100]}')
 
+    # moves we could not price last time (token not indexed yet, rate limit) get another try for an hour
+    newmoves = st.get('pending', []) + newmoves
     # token names / prices for everything new
     by_chain = {}
     for m in newmoves:
@@ -685,6 +735,7 @@ def main():
         sol_price = (tokens.get('Solana|So11111111111111111111111111111111111111112') or {}).get('price')
 
     have = {(m['chain'], m['tx'], m['wallet'], m['ca'], m['side']) for m in moves}
+    pending = []
     for m in newmoves:
         k = (m['chain'], m['tx'], m['wallet'], m['ca'], m['side'])
         if k in have:
@@ -696,21 +747,32 @@ def main():
             continue
         if m['chain'] == 'Solana':
             amount = m['amount']
-            usd = abs(m['sol']) * sol_price if (sol_price and abs(m.get('sol', 0)) > 0.002) else None
+            if abs(m.get('stable', 0)) >= 1:
+                usd = abs(m['stable'])
+            elif sol_price and abs(m.get('sol', 0)) > 0.01:      # above token-account rent and fees
+                usd = abs(m['sol']) * sol_price
+            else:
+                usd = None
         else:
             dec = info.get('dec')
             amount = int(m['raw']) / (10 ** int(dec)) if dec is not None else None
             usd = None
         if usd is None and amount is not None and info.get('price'):
             usd = amount * info['price']
-        if usd is None or usd < 5:
-            continue                       # dust, unpriced airdrop spam and rounding noise
+        if usd is None:
+            have.discard(k)
+            if NOW - m['ts'] < 3600:
+                pending.append(m)          # try again next pass
+            continue                       # unpriced after an hour: airdrop spam / unknown token
+        if usd < 5:
+            continue                       # dust and rounding noise
         gids = watch.get(m['chain'], {}).get(m['wallet'] if m['chain'] == 'Solana' else m['wallet'].lower()) \
             or watch.get(m['chain'], {}).get(m['wallet'], [])
         moves.append(dict(chain=m['chain'], wallet=m['wallet'], groups=gids, ts=m['ts'], side=m['side'],
                           ca=m['ca'], sym=sym, usd=round(usd, 2) if usd else None,
                           mc=info.get('mc'), tx=m['tx'], new=NOW))
 
+    st['pending'] = pending[-500:]
     cut = NOW - KEEP_DAYS * 86400
     moves = [m for m in moves if m['ts'] >= cut]
     moves.sort(key=lambda m: -m['ts'])
@@ -753,18 +815,18 @@ def main():
     akeys = {(a['chain'], a['ca'], a['kind'], a.get('group', '')): a for a in alerts}
     for (chain, ca), b in buys.items():
         multi = [g for g, ws in b['by'].items()]
-        if len(set().union(*b['by'].values())) < 2:
-            multi = []                     # one wallet sitting in two overlapping teams is not two teams
+        if len({frozenset(ws) for ws in b['by'].values()}) < 2 or len(set().union(*b['by'].values())) < 2:
+            multi = []                     # the same wallets sitting in overlapping teams are not separate teams
         for g, ws in b['by'].items():
             if len(ws) >= 2:
                 k = (chain, ca, 'group', g)
-                a = akeys.get(k) or dict(chain=chain, ca=ca, kind='group', group=g, first_alert=NOW)
+                a = akeys.get(k) or dict(chain=chain, ca=ca, kind='group', group=g, first_alert=NOW, mc_at_alert=b['mc'])
                 a.update(sym=b['sym'], mc=b['mc'], wallets=len(ws), group_name=gname.get(g, g),
                          usd=round(b['usd'], 2), first_buy=b['first'], updated=NOW)
                 akeys[k] = a
         if len(multi) >= 2:
             k = (chain, ca, 'multi', '')
-            a = akeys.get(k) or dict(chain=chain, ca=ca, kind='multi', group='', first_alert=NOW)
+            a = akeys.get(k) or dict(chain=chain, ca=ca, kind='multi', group='', first_alert=NOW, mc_at_alert=b['mc'])
             a.update(sym=b['sym'], mc=b['mc'], groups=sorted(multi)[:12], n_groups=len(multi),
                      group_names=[gname.get(g, g) for g in sorted(multi)[:6]],
                      usd=round(b['usd'], 2), first_buy=b['first'], updated=NOW)
@@ -923,8 +985,9 @@ def main():
     runs.insert(0, dict(at=NOW, secs=int(time.time() - T0), new_moves=sum(1 for m in moves if m.get('new') == NOW),
                         gt_calls=GT.calls, errors=ERRORS[:8]))
     meta = dict(updated=NOW, updated_utc=utc(NOW), runs=runs[:48],
-                chains={c: dict(st.get('evm', {}).get(c, {}), **{k: v for k, v in st.get('bs', {}).get(c, {}).items()
-                                                                 if k != 'last'}, wallets=len(watch.get(c, {}))) for c in EVM},
+                chains={c: dict(({k: v for k, v in st.get('bs', {}).get(c, {}).items() if k != 'last'}
+                                 if c in BLOCKSCOUT else st.get('evm', {}).get(c, {})),
+                                wallets=len(watch.get(c, {}))) for c in EVM},
                 solana=dict({k: v for k, v in st.get('sol', {}).items() if k != 'last'},
                             wallets=len(watch.get('Solana', {}))))
     save(os.path.join(OUT, 'moves.json'), dict(updated=NOW, rows=moves))
