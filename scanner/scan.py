@@ -8,7 +8,7 @@ Runs on a timer (GitHub Actions). Standard library only.
 Writes the dashboard data to docs/data/*.json and its own cursor to data/state.json.
 Everything here is read-only public chain data. Nothing trades.
 """
-import json, os, sys, time, html, zlib, urllib.request, urllib.error, datetime as dt
+import json, os, re, sys, time, html, zlib, urllib.request, urllib.error, datetime as dt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, 'data')
@@ -39,7 +39,7 @@ BASE_SYMBOLS = {'WETH', 'ETH', 'WBNB', 'BNB', 'USDC', 'USDT', 'DAI', 'BUSD', 'FD
 WSOL = 'So11111111111111111111111111111111111111112'
 STABLES = {'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF8KAQoQGyFw53xcjjZzdKgcqfTsQ'}
 SOL_BASE_MINTS = {WSOL} | STABLES
-SCAN_RESERVE = 110      # seconds kept back after the chain scans for prices, alerts, signals and discovery
+SCAN_RESERVE = 150      # seconds kept back after the chain scans for prices, alerts, signals and discovery
 
 
 def left():
@@ -171,10 +171,16 @@ def token_info(chain, addrs, cache):
             pa = pools.get(tp[0].get('id')) if tp else None
             if pa:
                 pc = pa.get('price_change_percentage') or {}
-                try:
-                    row['created'] = int(dt.datetime.fromisoformat(pa['pool_created_at'].replace('Z', '+00:00')).timestamp())
-                except Exception:
-                    pass
+                row['pool'] = pa.get('address') or tp[0].get('id', '').split('_', 1)[-1]
+                made = []
+                for x in tp:                      # token age = its oldest top pool, not a fresh side pool
+                    try:
+                        made.append(int(dt.datetime.fromisoformat(
+                            pools[x.get('id')]['pool_created_at'].replace('Z', '+00:00')).timestamp()))
+                    except Exception:
+                        pass
+                if made:
+                    row['created'] = min(made + ([old['created']] if old.get('created') else []))
                 row.update(ch1=_f(pc.get('h1')), ch6=_f(pc.get('h6')), ch24=_f(pc.get('h24')),
                            vol24=_f((pa.get('volume_usd') or {}).get('h24')))
             cache[key] = row
@@ -510,51 +516,161 @@ def scan_solana(wallets, st, newmoves, priority=(), deadline=None):
 
 
 # ---------------------------------------------------------------- discovery
-def discover(chain, watch_set, disc):
+DISC_PATHS = ['trending_pools?duration=5m&page=1', 'trending_pools?duration=1h&page=1', 'new_pools?page=1',
+              'trending_pools?duration=6h&page=1', 'trending_pools?duration=24h&page=1', 'new_pools?page=2']
+DISC_MIN_MC = 500_000
+DISC_MAX_AGE = 7 * 86400
+
+
+def discover(chain, disc, st):
+    """Collect tokens on this chain that are past $500K: two GeckoTerminal lists per pass, rotating through
+    trending (5m/1h/6h/24h) and new pools, so over a few passes every list is covered."""
     net = GT_NET[chain]
-    pools = []
-    for path in (f'/networks/{net}/trending_pools?duration=1h&page=1', f'/networks/{net}/new_pools?page=1'):
-        if left() < 40:
+    rot = st.setdefault('disc_rot', {})
+    k = rot.get(chain, 0)
+    rot[chain] = (k + 2) % len(DISC_PATHS)
+    for path in (DISC_PATHS[k % len(DISC_PATHS)], DISC_PATHS[(k + 1) % len(DISC_PATHS)]):
+        if left() < 60:
             return
-        r = GT.get(path)
-        pools += (r or {}).get('data', [])
-    for p in pools:
-        a = p.get('attributes', {})
-        created = a.get('pool_created_at')
+        r = GT.get(f'/networks/{net}/{path}')
+        for p in (r or {}).get('data', []):
+            a = p.get('attributes', {})
+            mc = _f(a.get('market_cap_usd')) or _f(a.get('fdv_usd')) or 0
+            if mc < DISC_MIN_MC or mc > 2_000_000_000:
+                continue
+            sym0 = (a.get('name') or '?').split(' / ')[0].strip().upper()
+            if sym0 in BASE_SYMBOLS or 'USD' in sym0:
+                continue
+            base = (p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
+            ca = base.split('_', 1)[-1]
+            if not ca:
+                continue
+            if chain != 'Solana':
+                ca = ca.lower()
+            key = f'{chain}|{ca}'
+            row = disc.get(key) or dict(chain=chain, ca=ca, first_seen=NOW)
+            row.update(sym=html.unescape((a.get('name') or '?').split(' / ')[0])[:24],
+                       mc=mc, ath=max(mc, row.get('ath') or 0), seen=NOW)
+            disc[key] = row
+
+
+def evm_backfill(chain, ca, created, wallets, st):
+    """Every transfer of this token INTO a watched wallet since the token launched (getLogs with the token as
+    address filter, so any block range is allowed). Resumes across passes; keeps each wallet's first receipt."""
+    bf = st.setdefault('bf', {}).setdefault(f'{chain}|{ca}', {})
+    if bf.get('done') or not wallets:
+        return bf
+    cfg = EVM[chain]
+    rpc = RPC(chain, cfg['rpcs'], gap=0.12)
+    try:
+        head = int(rpc.call('eth_blockNumber', []), 16)
+    except Exception:
+        return bf
+    if 'next' not in bf:
+        age = max(3600, NOW - (created or NOW))
+        bf.update(next=max(0, head - int(age / cfg['block_s'] * 1.15) - 300), first={},
+                  rng=100000 if chain == 'Robinhood' else 20000)
+    wl = sorted(wallets)
+    wset = set(wl)
+    tops = [topic(w) for w in wl]
+    t_end = time.time() + 20
+    while bf['next'] <= head and time.time() < t_end and left() > 30:
+        b = bf['next']
+        e = min(head, b + bf['rng'] - 1)
         try:
-            cts = int(dt.datetime.fromisoformat(created.replace('Z', '+00:00')).timestamp())
-        except Exception:
-            continue
-        mc = _f(a.get('market_cap_usd')) or _f(a.get('fdv_usd')) or 0
-        if NOW - cts > 72 * 3600 or mc < 500_000:
-            continue
-        sym0 = (a.get('name') or '?').split(' / ')[0].strip().upper()
-        if sym0 in BASE_SYMBOLS or 'USD' in sym0 or mc > 2_000_000_000:
-            continue    # stables, majors and new pools of old big tokens
-        base = (p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
-        ca = base.split('_', 1)[-1]
-        if chain != 'Solana':
-            ca = ca.lower()
-        key = f'{chain}|{ca}'
-        row = disc.get(key) or dict(chain=chain, ca=ca, first_seen=NOW, watched=[])
-        row.update(sym=html.unescape((a.get('name') or '?').split(' / ')[0])[:24], pool=a.get('address'), created=cts,
-                   mc=mc, ath=max(mc, row.get('ath') or 0), liq=_f(a.get('reserve_in_usd')),
-                   vol24=_f((a.get('volume_usd') or {}).get('h24')), seen=NOW)
-        disc[key] = row
-    # who traded these? check pool trades of the freshest few for watched wallets
-    fresh = sorted((r for r in disc.values() if r['chain'] == chain and NOW - r['seen'] < 900),
-                   key=lambda r: -(r.get('mc') or 0))[:4]
-    for r in fresh:
-        if left() < 40 or not r.get('pool'):
+            got = []
+            for i in range(0, len(tops), 500):       # the token address filter lets one call carry every wallet
+                got += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e), 'address': ca,
+                                                 'topics': [TRANSFER, None, tops[i:i + 500]]}]) or []
+        except Exception as ex:
+            msg = str(ex).lower()
+            cap = re.search(r'only (\d+) are allowed|max(?:imum)? (?:block )?range[^0-9]*(\d+)|(\d+) block', msg)
+            if bf['rng'] > 500 and any(x in msg for x in ('range', 'too many', 'exceed', 'large', 'limit', 'results', 'allowed')):
+                n = next((int(g) for g in (cap.groups() if cap else ()) if g), 0)
+                if 500 <= n < bf['rng']:
+                    bf['rng'] = bf['cap'] = n          # the node told us its limit; remember it
+                else:
+                    bf['rng'] = max(500, bf['rng'] // 4)
+                continue
+            ERRORS.append(f'{chain} backfill: {str(ex)[:80]}')
             break
-        t = GT.get(f'/networks/{net}/pools/{r["pool"]}/trades')
-        hits = set(r.get('watched') or [])
-        for tr in (t or {}).get('data', []):
-            fa = (tr.get('attributes') or {}).get('tx_from_address') or ''
-            fa = fa if chain == 'Solana' else fa.lower()
-            if fa in watch_set:
-                hits.add(fa)
-        r['watched'] = sorted(hits)
+        for l in got:
+            t = l.get('topics') or []
+            if len(t) != 3:
+                continue
+            frm, to = '0x' + t[1][-40:], '0x' + t[2][-40:]
+            if frm in wset or to not in wset:
+                continue                    # a team wallet passing tokens to its sibling is not a buy
+            bn = int(l['blockNumber'], 16)
+            prev = bf['first'].get(to)
+            if not prev or bn < prev[0]:
+                bf['first'][to] = [bn, l['transactionHash']]
+        bf['next'] = e + 1
+        bf['rng'] = min(bf['rng'] * 2, bf.get('cap') or (100_000 if chain == 'Robinhood' else 50_000))
+    if bf['next'] > head:
+        bf['done'] = True
+    for w, v in sorted(bf['first'].items(), key=lambda kv: kv[1][0])[:6]:
+        if len(v) == 2 and left() > 25:
+            try:
+                v.append(int(rpc.call('eth_getBlockByNumber', [hex(v[0]), False])['timestamp'], 16))
+            except Exception:
+                pass
+    return bf
+
+
+def price_at(candles, ts):
+    """Close of the last 1-minute candle at or before ts (candles: [t, o, h, l, c, v])."""
+    best = None
+    for c in candles:
+        if c[0] <= ts and (best is None or c[0] > best[0]):
+            best = c
+    if best is None:
+        early = [c for c in candles if c[0] <= ts + 600]
+        if early:
+            best = min(early, key=lambda c: c[0])
+            return best[1]
+        return None
+    return best[4]
+
+
+def check_entry(r, first, st, tokens):
+    """Market cap when the first team wallet bought, when our scanner would have seen it, and the best it
+    reached afterwards: the honest answer to 'could we actually have bought this?'."""
+    net = GT_NET[r['chain']]
+    pool = r.get('pool')
+    if not pool or not first:
+        return
+    fts, fw, seen_ts = first[0]['ts'], first[0]['wallet'], first[0].get('seen') or first[0]['ts'] + 420
+    if r.get('entry_ts') == fts and r.get('entry_mc'):
+        return
+    m1 = GT.get(f'/networks/{net}/pools/{pool}/ohlcv/minute?aggregate=1&before_timestamp={int(seen_ts) + 600}'
+                f'&limit=60&currency=usd')
+    h1 = GT.get(f'/networks/{net}/pools/{pool}/ohlcv/hour?aggregate=1&limit=200&currency=usd')
+    mins = ((m1 or {}).get('data', {}).get('attributes', {}) or {}).get('ohlcv_list') or []
+    hours = ((h1 or {}).get('data', {}).get('attributes', {}) or {}).get('ohlcv_list') or []
+    if not hours:
+        return
+    last_close = max(hours, key=lambda c: c[0])[4]
+    supply = (r.get('mc') or 0) / last_close if last_close else None
+    if not supply:
+        return
+    p_first, p_seen = price_at(mins, fts), price_at(mins, seen_ts)
+    peak_p = max([c[2] for c in hours if c[0] >= fts - 3600] or [0])
+    r.update(entry_ts=fts, entry_wallet=fw,
+             entry_mc=round(p_first * supply) if p_first else None,
+             seen_ts=int(seen_ts), seen_mc=round(p_seen * supply) if p_seen else None,
+             peak_after=max(round(peak_p * supply), r.get('peak_after') or 0, r.get('mc') or 0))
+
+
+def verdict(r):
+    seen, peak = r.get('seen_mc') or r.get('entry_mc'), r.get('peak_after')
+    if not r.get('first_buys'):
+        return 'none'
+    if not seen or not peak:
+        return 'unknown'
+    room = peak / seen
+    r['room'] = round(room, 2)
+    return 'yes' if room >= 2 else 'some' if room >= 1.3 else 'late'
 
 
 # ---------------------------------------------------------------- team labels
@@ -957,26 +1073,93 @@ def main():
     srows = sorted((r for r in sigs.values() if NOW - r['first_signal'] < 7 * 86400), key=lambda r: -r['first_signal'])
     notify(srows, {g['id']: g for g in groups})
 
-    # discovery: new tokens past $500K, and whether watched wallets are in
-    watch_set = {}
-    for chain, ws in watch.items():
-        watch_set[chain] = set(ws) if chain == 'Solana' else {w.lower() for w in ws}
-    for chain in ['Solana', 'BSC', 'Base', 'Robinhood', 'Ethereum']:
-        if left() < 45:
+    # discovery: every token past $500K in the last 7 days, whether our teams bought it, at what market cap,
+    # and whether a follower could still have made money after our scanner saw the buy
+    for chain in ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']:
+        if left() < 70:
             break
         try:
-            discover(chain, watch_set.get(chain, set()), disc)
+            discover(chain, disc, st)
         except Exception as e:
             ERRORS.append(f'discovery {chain}: {type(e).__name__}')
-    for r in disc.values():
-        early = {m['wallet'] for m in moves if m['chain'] == r['chain'] and m['ca'] == r['ca'] and m['side'] == 'buy'}
-        r['watched'] = sorted(set(r.get('watched') or []) | early)
-        gs = set()
-        for w in r['watched']:
-            gs.update(watch.get(r['chain'], {}).get(w, []))
-        r['groups'] = sorted(gs)
+    for m in moves:                                   # anything our teams bought that went past $500K
+        if m['side'] == 'buy' and (m.get('mc') or 0) >= DISC_MIN_MC:
+            disc.setdefault(f"{m['chain']}|{m['ca']}", dict(chain=m['chain'], ca=m['ca'], first_seen=NOW,
+                                                             sym=m['sym'], mc=m['mc'], ath=m['mc'], seen=NOW))
+    by_c = {}
+    for r in sorted(disc.values(), key=lambda r: -r.get('seen', 0)):
+        by_c.setdefault(r['chain'], []).append(r['ca'])
+    for chain, cas in by_c.items():
+        if left() > 60:
+            token_info(chain, cas[:60], tokens)
+    for key, r in list(disc.items()):
+        info = tokens.get(key) or {}
+        if info:
+            r.update(sym=info.get('sym') or r.get('sym'), liq=info.get('liq'), vol24=info.get('vol24'),
+                     created=info.get('created') or r.get('created'), pool=info.get('pool') or r.get('pool'))
+            if info.get('mc'):
+                r['mc'] = info['mc']
+                r['ath'] = max(r.get('ath') or 0, info['mc'])
+                r['peak_after'] = max(r.get('peak_after') or 0, info['mc']) if r.get('entry_ts') else r.get('peak_after')
+        if r.get('created') and NOW - r['created'] > DISC_MAX_AGE:
+            disc.pop(key)                              # older than 7 days: not a fresh launch any more
+    order = sorted(disc.values(), key=lambda r: (r.get('checked') or 0, -(r.get('created') or 0)))
+    for r in order:
+        if left() < 35:
+            break
+        chain, ca = r['chain'], r['ca']
+        firsts = {}
+        for m in moves:
+            if m['chain'] == chain and m['ca'] == ca and m['side'] == 'buy':
+                w = m['wallet']
+                if w not in firsts or m['ts'] < firsts[w]['ts']:
+                    firsts[w] = dict(wallet=w, ts=m['ts'], usd=m.get('usd'), seen=m.get('new'), src='live')
+        if chain in EVM and r.get('created'):
+            try:
+                bf = evm_backfill(chain, ca, r['created'], [w.lower() for w in watch.get(chain, {})], st)
+            except Exception as e:
+                bf = {}
+                ERRORS.append(f'backfill {chain}: {type(e).__name__}')
+            for w, v in (bf.get('first') or {}).items():
+                if len(v) >= 3 and (w not in firsts or v[2] < firsts[w]['ts']):
+                    firsts[w] = dict(wallet=w, ts=v[2], usd=None, seen=None, src='chain', tx=v[1])
+            r['backfill_done'] = bool(bf.get('done'))
+        elif chain == 'Solana' and r.get('pool') and r.get('created') and NOW - r['created'] < 6 * 3600 \
+                and NOW - (r.get('trades_at') or 0) > 1200 and left() > 50:
+            r['trades_at'] = NOW                       # fresh Solana launch: read its latest trades for our wallets
+            t = GT.get(f"/networks/solana/pools/{r['pool']}/trades")
+            for tr in (t or {}).get('data', []):
+                a = tr.get('attributes') or {}
+                w = a.get('tx_from_address') or ''
+                if a.get('kind') == 'buy' and w in watch.get('Solana', {}):
+                    try:
+                        ts = int(dt.datetime.fromisoformat(a['block_timestamp'].replace('Z', '+00:00')).timestamp())
+                    except Exception:
+                        continue
+                    if w not in firsts or ts < firsts[w]['ts']:
+                        firsts[w] = dict(wallet=w, ts=ts, usd=_f(a.get('volume_in_usd')), seen=None, src='trades')
+        fl = sorted(firsts.values(), key=lambda x: x['ts'])
+        for f in fl:
+            f['groups'] = watch.get(chain, {}).get(f['wallet'] if chain == 'Solana' else f['wallet'].lower(), [])
+        r['first_buys'] = fl[:8]
+        r['n_wallets'] = len(fl)
+        gs = []
+        for f in fl:
+            for g in f['groups']:
+                if g not in gs:
+                    gs.append(g)
+        r['groups'] = gs[:12]
+        r['watched'] = [f['wallet'] for f in fl]
+        r['checked'] = NOW
+        if fl and left() > 40:
+            try:
+                check_entry(r, fl, st, tokens)
+            except Exception as e:
+                ERRORS.append(f'entry {chain}: {type(e).__name__}')
+        r['verdict'] = verdict(r)
+    st['bf'] = {k: v for k, v in st.get('bf', {}).items() if k in disc}
     drows = [r for r in disc.values() if r.get('seen', 0) >= cut]
-    drows.sort(key=lambda r: (-len(r.get('watched') or []), -(r.get('mc') or 0)))
+    drows.sort(key=lambda r: (-(r.get('created') or 0)))
 
     # trim token cache
     st['tokens'] = {k: v for k, v in tokens.items() if NOW - v.get('at', 0) < 3 * 86400}
