@@ -592,7 +592,8 @@ def load_seed():
                     watch[chain][w].append(gid)
             groups.append(dict(id=gid, chain=chain, kind=p[2], tier=p[3], name=p[4], n=len(ws),
                                winners=int(p[5] or 0), failed=int(p[6] or 0), profit=int(p[7] or 0),
-                               seed_last_ts=int(p[8]) if p[8] else None, wallets=ws))
+                               seed_last_ts=int(p[8]) if p[8] else None, wallets=ws,
+                               legit=int(p[10]) if len(p) > 10 and p[10].isdigit() else 0))
     return label_groups(groups), watch
 
 
