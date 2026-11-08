@@ -101,7 +101,7 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
   <button data-v="feed">Live feed</button>
   <button data-v="teams">Teams</button>
   <button data-v="alerts">Alerts</button>
-  <button data-v="new">New tokens</button>
+  <button data-v="new">Past $500K</button>
   <button data-v="how">How to read this</button>
 </div>
 <div class="bar">
@@ -122,7 +122,7 @@ const PROVEN_GRADES=new Set(['Elite','Strong','Tested']);
 const AGE_MAX=72,FEED_MIN=100,HOT_MIN=200;
 
 let D={moves:[],groups:[],alerts:[],disc:[],hot:[],sig:null,meta:{}},GMAP={};
-let view='signals',chain='All',q='',bestMode='best',age='fresh',fading=false,sigFading=false,feedAll=false,hotSmall=false;
+let view='signals',chain='All',q='',bestMode='best',age='fresh',fading=false,sigFading=false,feedAll=false,hotSmall=false,newAll=false;
 let lastLoad=0,loading=false;
 
 const $=s=>document.querySelector(s);
@@ -361,12 +361,29 @@ function vAlerts(){
 
 /* ---------- New tokens ---------- */
 function vNew(){
-  const rows=D.disc.filter(r=>inChain(r)&&match(r));
-  $('#view').innerHTML=`<p class="lead">New tokens (under 3 days old) that passed $500K market cap, and whether any of our team wallets were in early.</p>
-  <div class="card scroll"><table><thead><tr><th>Token</th><th class="n">Market cap</th><th class="hide-m">Age</th><th>Our teams in?</th></tr></thead><tbody>
-  ${rows.map(r=>{const c=num(r.created);return`<tr><td>${tokLink(r)}<div class="chain">${esc(r.chain||'?')}</div></td><td class="n">${usd(r.mc)}</td><td class="hide-m muted">${c?ageFmt(Math.max(0,now()-c)/3600)+' old':'—'}</td>
-    <td>${arr(r.groups).length?`<div class="teams">${chips(r.groups)}</div>`:arr(r.watched).length?plural(arr(r.watched).length,'watched wallet'):'<span class="faint">none seen</span>'}</td></tr>`}).join('')||'<tr><td colspan="4" class="empty">None yet.</td></tr>'}
-  </tbody></table></div>`;
+  const all=D.disc.filter(r=>inChain(r)&&match(r));
+  const rows=all.filter(r=>newAll||arr(r.first_buys).length).sort((x,y)=>(num(y.created)||0)-(num(x.created)||0));
+  const bought=all.filter(r=>arr(r.first_buys).length),yes=bought.filter(r=>r.verdict==='yes').length,some=bought.filter(r=>r.verdict==='some').length,late=bought.filter(r=>r.verdict==='late').length;
+  const V={yes:['Could have bought','up'],some:['Some room','muted'],late:['Too late','down'],unknown:['No price yet','faint'],none:['No team buy','faint']};
+  const mcAt=(m,ts,c)=>m?`<b>${usd(m)}</b><div class="chain">${ts&&c?ageFmt(Math.max(0,ts-c)/3600)+' after launch':''}</div>`:'<span class="faint">—</span>';
+  $('#view').innerHTML=`<p class="lead">Every token from the last 7 days that went past $500K market cap. For each one we check whether any of our team wallets bought it, at what market cap the <b>first team wallet</b> got in, what it was at when our scanner would have seen that buy (a few minutes later), and the best it reached after. That tells you honestly whether following the team could have made money.</p>
+  <div class="summary">
+    <div class="kpi"><span>Tokens past $500K (7d)</span><b>${all.length}</b></div>
+    <div class="kpi"><span>Our teams were in</span><b>${bought.length}</b></div>
+    <div class="kpi"><span>Could have bought (2x+ left)</span><b class="up">${yes}</b></div>
+    <div class="kpi"><span>Some room / too late</span><b>${some} / ${late}</b></div>
+  </div>
+  <div class="bar seg"><button data-n="bought" class="${newAll?'':'on'}">Only ones our teams bought</button><button data-n="all" class="${newAll?'on':''}">All ${all.length} tokens</button></div>
+  <div class="card scroll"><table><thead><tr><th>Token</th><th class="n">MC now / best</th><th>First team buy</th><th class="n hide-m">When we'd have seen it</th><th>Verdict</th></tr></thead><tbody>
+  ${rows.map(r=>{const c=num(r.created),fb=arr(r.first_buys),f=fb[0],v=V[r.verdict]||(fb.length?V.unknown:V.none);
+    const pending=(r.chain!=='Solana'&&r.backfill_done===false)?'<div class="chain">still checking older blocks…</div>':'';
+    return`<tr><td>${tokLink(r)}<div class="chain">${esc(r.chain||'?')} · ${c?ageFmt(Math.max(0,now()-c)/3600)+' old':'age ?'}</div></td>
+    <td class="n">${usd(r.mc)}<div class="chain">best ${usd(Math.max(num(r.peak_after)||0,num(r.ath)||0)||null)}</div></td>
+    <td>${f?`${mcAt(r.entry_mc,num(f.ts),c)}<div class="teams">${chips(r.groups,3)}</div><div class="chain">${plural(fb.length,'team wallet')}</div>`:'<span class="faint">none of our wallets</span>'}${pending}</td>
+    <td class="n hide-m">${r.seen_mc?`${usd(r.seen_mc)}<div class="chain">${f&&f.seen?ageFmt(Math.max(0,(num(f.seen)||0)-(num(f.ts)||0))/3600)+' after the buy':'~7m after the buy'}</div>`:'<span class="faint">—</span>'}</td>
+    <td><span class="tag ${v[1]}">${v[0]}</span>${num(r.room)?`<div class="chain">${num(r.room).toFixed(1)}x from where we'd see it to its best</div>`:''}</td></tr>`}).join('')||`<tr><td colspan="5" class="empty">${newAll?'No tokens past $500K yet.':'None of our teams bought a $500K+ token in the last 7 days yet. Older buys are being checked a few tokens per scan.'}</td></tr>`}
+  </tbody></table></div>
+  <p class="faint" style="margin-top:8px;font-size:12px">"Could have bought" = from the market cap at the moment our scanner would have seen the first team buy, the token later at least doubled. "Some room" = rose 30-100% more. "Too late" = under 30%. Robinhood, BSC, Base and Ethereum are checked from launch using the chain itself; Solana uses what our scanner saw live plus the token's latest trades, so very early Solana buys before the scanner started can be missed.</p>`;
 }
 
 /* ---------- How to read this ---------- */
@@ -398,7 +415,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)r
   else if(d.x){fading=!fading;render()}
   else if(d.sf){sigFading=!sigFading;render()}
   else if(d.f){feedAll=d.f==='all';render()}
-  else if(d.s){hotSmall=!hotSmall;render()}});
+  else if(d.s){hotSmall=!hotSmall;render()}
+  else if(d.n){newAll=d.n==='all';render()}});
 let qT=0;$('#q').addEventListener('input',e=>{clearTimeout(qT);const v=e.target.value.trim().toLowerCase();qT=setTimeout(()=>{if(v!==q){q=v;render()}},120)});
 window.addEventListener('hashchange',()=>{const v=location.hash.slice(1);if(VIEWS.includes(v)&&v!==view){view=v;render()}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastLoad>110000)load()});
