@@ -109,7 +109,7 @@ const gmgn=(c,ca)=>`https://gmgn.ai/${GM[c]||c}/token/${ca}`;
 const dex=(c,ca)=>`https://dexscreener.com/${DS[c]||c}/${ca}`;
 const G=()=>Object.fromEntries(D.groups.map(g=>[g.id,g]));
 function gname(id,full){const g=G()[id];if(!g)return id;return full?(g.label||g.name):(g.nick||g.name)}
-function teamChip(id){const g=G()[id];if(!g)return`<span class="tag">${esc(id)}</span>`;return`<span class="tag g-${esc(g.grade||'')}" title="${esc((g.style||'')+' · '+(g.grade||'')+' · '+g.winners+' wins / '+g.failed+' misses')}">${esc(g.nick||g.name)}</span>`}
+function teamChip(id){const g=G()[id];if(!g)return`<span class="tag">${esc(id)}</span>`;return`<span class="tag g-${esc(g.grade||'')}" title="${esc((g.style||'')+' · '+(g.grade||'')+' · '+g.winners+' wins / '+g.failed+' misses'+(g.legit?' · early on '+g.legit+' lasting tokens':''))}">${g.legit?'★ ':''}${esc(g.nick||g.name)}</span>`}
 async function j(f){try{const r=await fetch('data/'+f+'?t='+Date.now());if(!r.ok)return null;return await r.json()}catch(e){return null}}
 async function load(){
   const [m,g,a,d,h,meta]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json'].map(j));
@@ -136,9 +136,9 @@ function ageTxt(h){if(h.age_h==null)return'age ?';const a=h.age_h;return a<1?Mat
 function freshOK(h){if(!fading&&h.state==='fading')return false;if(age==='fresh')return h.age_h!=null&&h.age_h<=AGE_MAX;return true}
 function stateTag(h){const m={fresh:['Fresh','up'],running:['Running','up'],fading:['Fading','down'],older:h.age_h!=null&&h.age_h<=72?['Young','muted']:['Older','faint']}[h.state];return m?`<span class="tag ${m[1]}">${m[0]}</span>`:''}
 function freshBar(){return`<div class="bar seg"><button data-a="fresh" class="${age==='fresh'?'on':''}">Fresh only (under 3 days)</button><button data-a="all" class="${age==='all'?'on':''}">Any age</button><button data-x="1" class="${fading?'on':''}">${fading?'Showing':'Hiding'} fading tokens</button></div>`}
-const GW={Elite:3,Strong:2,Tested:2,Decent:1,Unproven:.5};
+const GW={Elite:3,Strong:2,Tested:2,Decent:1,Unproven:.5};const LW=g=>Math.min(g?.legit||0,3);
 const g6=h=>Array.isArray(h.groups_6h)?h.groups_6h:(h.groups||[]);
-function teamScore(h){return g6(h).reduce((s,id)=>s+(GW[G()[id]?.grade]??.5),0)}
+function teamScore(h){return g6(h).reduce((s,id)=>{const g=G()[id];return s+(GW[g?.grade]??.5)+LW(g)},0)}
 function heat(h){return teamScore(h)*3+Math.min(h.n_wallets,6)+Math.log10(1+(h.usd_6h||0))}
 function kpis(){
   const t6=now()-6*3600,t24=now()-86400;
@@ -211,7 +211,7 @@ function vTeams(){
     <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div><div class="faint" style="font-size:12px;margin-top:4px">Research id ${esc(g.id)} · ${esc(g.research_name||g.name)}</div>
     <div class="wl">${(g.wallets||[]).map(w=>`<a class="tag mono" href="https://gmgn.ai/${GM[g.chain]}/address/${w.w}" target="_blank" rel="noopener">${short(w.w)} · ${esc(w.role)}</a>`).join('')}</div></details></td>
     <td><span class="tag g-${esc(g.grade||'')}">${esc(g.grade||'—')}</span></td>
-    <td class="n">${g.winners} wins / ${g.failed} misses<div class="chain">${g.profit>0?usd(g.profit)+' profit found':''}</div></td>
+    <td class="n">${g.winners} wins / ${g.failed} misses${g.legit?`<div class="up" style="font-size:12px">★ early on ${g.legit} lasting token${g.legit===1?'':'s'}</div>`:''}<div class="chain">${g.profit>0?usd(g.profit)+' profit found':''}</div></td>
     <td>${a?.lb?`<span class="buy">bought</span> <b>${esc(a.lb.sym)}</b>`:'<span class="faint">no buys seen yet</span>'}<div class="chain">${a?.lb?ago(a.lb.ts):''}</div></td>
     <td class="n hide-m">${a?.b24||0}${a?.u24?`<div class="chain">${usd(a.u24)}</div>`:''}</td>
     <td class="hide-m muted">${a?[...a.toks].slice(0,5).map(esc).join(', '):''}</td></tr>`}).join('')}
@@ -240,6 +240,7 @@ function vHow(){
   <p><b>Team names.</b> Each team gets a fixed nickname (like "Zinc Bees") so you can follow it across the page, plus a style:</p>
   <p>· <b>Same-second snipers</b>: wallets that buy in the same second, so one person or bot runs them.<br>· <b>Same-minute crew</b>: wallets that keep hitting the same new tokens within a minute.<br>· <b>One-funder crew</b>: wallets funded by the same source wallet.<br>· <b>Wallet farm</b>: many fresh wallets from one funder, made to look like different buyers.<br>· <b>Launch team</b>: wallets tied to the token creator.<br>· <b>Insider team / Linked cluster</b>: wallets linked by repeated early co-buys.<br>· <b>Solo insider / Smart early buyer</b>: one wallet with a strong early-entry record.</p>
   <p><b>Grades</b> come from the track record we measured before watching: <span class="tag g-Elite">Elite</span> 10+ winners and 75%+ hit rate · <span class="tag g-Strong">Strong</span> 5+ winners and 60%+ · <span class="tag g-Decent">Decent</span> 3+ winners · <span class="tag">Unproven</span> fewer.</p>
+  <p><b>★ Lasting-token pickers.</b> Teams marked ★ were early on tokens that held their value for weeks (like PRIORS on Robinhood) in our 80-day study, not just quick pumps. Their buys count extra in Hot now.</p>
   <p><b>Token status.</b> <span class="tag up">Fresh</span> launched in the last 24h · <span class="tag up">Running</span> price up 10%+ in 1h or 25%+ in 6h · <span class="tag down">Fading</span> down 35%+ in 6h, 60%+ in 24h, or 60%+ below the highest market cap we saw · <span class="tag">Young</span> 1 to 3 days old, steady · <span class="tag faint">Older</span> everything else. Fading tokens and tokens older than 3 days are hidden by default.</p>
   <p><b>Buys only.</b> The page shows what teams are buying. Sells are left out because by the time a team sells, it is usually too late to act.</p>
   <p><b>Hot now</b> ranks tokens by how many separate teams and wallets bought in the last 6 hours, and how much they spent. <b>Best last 3 days</b> compares market cap now with market cap at the first team buy.</p>
