@@ -519,7 +519,7 @@ def _sol_pool(jobs, fn, deadline):
     def worker(url, gap):
         rpc = RPC('Solana', [url], gap=gap)
         while True:
-            if left() < 75 or time.time() > deadline or fails[0] > 25:
+            if left() < 75 or time.time() > deadline or fails[0] > 80:
                 return
             with lock:
                 if not q:
@@ -581,8 +581,14 @@ def scan_solana(wallets, st, newmoves, priority=(), deadline=None):
 
     def get_tx(rpc, job):
         _, w, s = job
-        tx = rpc.call('getTransaction', [s['signature'], {'encoding': 'jsonParsed',
-                                                         'maxSupportedTransactionVersion': 0}], tries=2)
+        try:
+            tx = rpc.call('getTransaction', [s['signature'], {'encoding': 'jsonParsed',
+                                                             'maxSupportedTransactionVersion': 0}], tries=2)
+        except RuntimeError as e:
+            if '-32015' in str(e):                    # a transaction format we cannot read: skip it for good
+                seen[w] = [s['signature']] + (seen.get(w) or [])[:79]
+                return
+            raise
         if tx and tx.get('meta'):
             _sol_parse(w, s, tx, wset, newmoves)
             seen[w] = [s['signature']] + (seen.get(w) or [])[:79]
