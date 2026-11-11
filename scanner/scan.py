@@ -1261,6 +1261,25 @@ def main():
                           groups_6h=sorted(h['groups_6h'])[:12], **token_extra(info)))
     hrows.sort(key=lambda r: -(r['last_buy'] or 0))
 
+    # follower score: what copying each team would have done lately. The research grade measures who was early,
+    # which also rewards wallets that dump on their followers; the backtest showed it does not predict this.
+    mc_now = {f"{r['chain']}|{r['ca']}": r.get('mc_now') for r in hrows}
+    firsts, fol = {}, {}
+    for m in sorted(moves, key=lambda m: m['ts']):
+        if m['side'] == 'buy' and (m.get('usd') or 0) >= 50 and m.get('mc') and 3600 <= NOW - m['ts'] <= 3 * 86400:
+            for g in m['groups']:
+                firsts.setdefault((g, m['chain'], m['ca']), m)
+    for (g, c, ca), m in firsts.items():
+        now_mc = mc_now.get(f'{c}|{ca}')
+        if now_mc:
+            fol.setdefault(g, []).append(max(-1.0, min(now_mc / m['mc'] - 1, 10.0)))
+    follow = {g: dict(n=len(v), med=round(sorted(v)[len(v) // 2], 3), win=round(sum(x > 0 for x in v) / len(v), 2))
+              for g, v in fol.items()}
+    for r in out_groups:
+        if r['id'] in follow:
+            r['follow'] = follow[r['id']]
+    trusted = {g for g in good_ids if (follow.get(g) or {}).get('n', 0) >= 5 and follow[g]['med'] >= 0}
+
     # buy signals: proven teams putting real money into a fresh launch, not dust and not exits
     sigs = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'signals.json'), {}).get('rows', [])}
     win2 = NOW - 2 * 3600
@@ -1303,6 +1322,8 @@ def main():
         if not ok or not sf:
             continue                                  # never signal a coin we cannot show is real and sellable
         strong = (c['buy'] >= 300 and len(c['wallets']) >= 2) or c['big'] >= 500
+        if not (c['teams'] & trusted):
+            continue                                  # at least one team whose recent buys paid a follower
         if not strong or c['sell'] > 0.5 * c['buy']:
             continue
         r = sigs.get(k)
@@ -1310,7 +1331,7 @@ def main():
             r = dict(chain=c['chain'], ca=c['ca'], first_signal=NOW, mc_at_signal=info.get('mc'),
                      age_at_signal_h=round(age_h, 2), first_buy=c['first'], notified=False)
             sigs[k] = r
-        r.update(sym=info.get('sym') or c['sym'], buy_usd=round(c['buy'], 2), sell_usd=round(c['sell'], 2),
+        r.update(trusted=sorted(c['teams'] & trusted)[:6], sym=info.get('sym') or c['sym'], buy_usd=round(c['buy'], 2), sell_usd=round(c['sell'], 2),
                  n_wallets=len(c['wallets']), teams=sorted(c['teams'])[:8], n_teams=len(c['teams']),
                  biggest=round(c['big'], 2), last_seen=NOW)
     cas = {}
