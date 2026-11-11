@@ -1,0 +1,48 @@
+# research flags: team|<group id>|<label>|<reason>   and   ring|<chain>|<wallet>|<role>|<ring>|<note>
+team|EB:B-T04|Sells into KOL buyers|Biggest 30d sell (牛逼, $6.1K) came 5 s after a KOL buy, with no buy of its own before it (tokens arrived another way); 平权 sold 14 s after a KOL buy, 40 s after buying. 牛逼's deployer 0x9261c678 has 77 GMGN rat_trader holders that never bought. 2 of 5 top sells KOL-timed
+team|PR:PR_N17|Sells into KOL buyers|ROBINHOOD and VRAX: bought 31 s / 17 s before selling, and 2 KOLs bought 17-20 s before the sell, so the wallet bought just ahead of the KOLs and sold into them. 2 of 3 sells
+team|XR:LR_T04|Sells into KOL buyers|All 5 top sells (CHLOE, SPERM, VAUBAN, ORGANON, Leverhood) came 15-221 s after 1-2 KOL buys; small sizes ($237-320). Leader 0x4d9644d0 is itself GMGN KOL 降雨幾率 (run1ooooo1), so this looks like a KOL crew selling into other KOLs' buys
+team|XR:LR_C01|Sells into KOL buyers|Fast flipper: sells come 2-18 s after its own buys (MUSE, HI, TRENCHVLAD, 🪐); on 🪐 it bought 2 s before and sold 1 s after 3 KOL buys. Bot-like, not a pre-pump insider
+ring|Solana|6DQAGJT7VZPVBsuG4kn3AvpyHCEi7B2RFFvMZdbqQqqP|kol_public|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK|kol_public|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|VVV4C8wbLVU5Yw2JmdF7SPmoG2ubmJmmcjzHAJcdHgH|kol_public|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|2YVfe9f4gw5RUCdhbE84aEaANUjCKqMu5nwURLEPGc75|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|Fwt2uT81DSuPtknCykZE455T85xakkx9kr6GK6YDgZe6|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|5mCpT7dvez6qd6gBqUx2yRFh31sJPa9Vz987FcebNLH6|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|L1SEi2naAxyc1UyYoyVf6X9tnBYwrL7pfgBfbRVURaT|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|4Gt84eWsTpEoGLpnJDZkpuSBLF3NzJJ9jb876LQHT27v|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|8zJmpQynf7JNKcWfarRczdonYxeZd27Pak1b3HAgFYei|side|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|3dHniL84uuybxxDVatmnLoowdWChTGgRebHtWB5hGuvn|operational|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|AaAhDvxPVgDHtYEaJ7GfiJrRtAp1dYkY49kRYvBK8Hj7|operational|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|9R1gdT9ynQe8e5pHgaWwEP1NeJwdLh23vjAWtGvi43fa|funder|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|3PPcSduPGrffHnBW7TCU3sk8gcm1EeHNuXMstiB3Ebqj|funder|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|FfUeQmgpTrSFaQUMuhwNDhMCnM6eAiBFJFT9QjxwKj4d|funder|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|5qyLoTPo3JfNxoo11pX8t5Woq7ZsoxADZxWR9w63AwJC|funder|Cupsey|Bubblemaps Nov 2026: side wallets buy before the KOL, then dump into his followers
+ring|Solana|ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn|side|Cupsey|pre-held on 2 KOL buys ({'transfer_in': 2}), sold median 143s after; 
+ring|Solana|2aawnykyLPVo1cSLMhrTGCuMmF27S6mMtPbukbGDmG4Z|side_kol_funded|daumenxyz|pre-held on 2 KOL buys ({'buy_before': 2}), sold median 20s after; 
+ring|Solana|BRVfmx2rQqi59uAiKDELZGZBWiHrStzPYCyd1Wahj5QZ|side_kol_funded|daumenxyz|pre-held on 2 KOL buys ({'held': 1, 'buy_before': 1}), sold median 20s after; 
+ring|Solana|5q72uEZWopwAAKX3RWgT6HhexqToXNRPC66zDc8PpojT|side_kol_funded|daumenxyz|pre-held on 2 KOL buys ({'held': 1, 'buy_before': 1}), sold median 20s after; tokens sent from BRVfmx
+ring|Solana|417xLGqLCbJqP8GETpfTYtXSUxuqUyrZ3XQpA5htuoT2|side_kol_funded|daumenxyz|pre-held on 2 KOL buys ({'held': 1, 'buy_before': 1}), sold median 2s after; 
+ring|Robinhood|0x8c50b739c78922e1c25a92f0dd5ef5ca4c176364|side|阿峰_Afeng|held before KOL buy; sold 105 s (median) after it on 3 tokens; 0 no-buy sells; 0 sells in the 10 min before KOL buys; seen around 2 KOLs
+ring|Robinhood|0x5e972ac496e6875b2eb70e88d2d67793662ba029|side|金狗挖掘机|held before KOL buy; sold 9 s (median) after it on 3 tokens; all 3 sells with no on-chain buy (transfer-in); GMGN tags top_holder/rat_trader; only thi
+ring|Robinhood|0xbfdeb7652a8b49a91d44210b9c3da34ea940f352|side|Ed_x區塊日記🇭🇰|held before KOL buy; sold 30 s (median) after it on 4 tokens; all 4 sells with no on-chain buy (transfer-in); only this KOL
+ring|BSC|0xab49f0bbaedd112512abe673de5cdbb0f7f1a1bb|side|枯坐p小将|held before KOL buy; sold 11 s (median) after it on 2 tokens; both with no on-chain buy; GMGN tag rat_trader; weak (2 tokens)
+ring|BSC|0x205fed37e84e10dc99cb004307852921cec69da1|side|casino|held before KOL buy; sold 79 s (median) after it on 3 tokens; 1 no-buy sell; seen around 2 KOLs; GMGN tags axiom
+ring|BSC|0x285298e9a74773fc7634ddb4469d2c4e31475ee3|side|casino|held before KOL buy; sold 85 s (median) after it on 3 tokens; 1 no-buy sell; seen around 2 KOLs; GMGN tags axiom
+ring|BSC|0x4d0d70409c056d919173bcd69292d22bccdbfae3|side|yukaz|held before KOL buy; sold 1 s (median) after it on 3 tokens; all 3 with no on-chain buy (transfer-in); 1 sell in the 10 min before a KOL buy; GMGN tag
+ring|BSC|0xccb522c608313d247512c600673b907e3a979528|side|yukaz|held before KOL buy; sold 16 s (median) after it on 2 tokens; both with no on-chain buy; GMGN tags fresh_wallet/top_holder/rat_trader; weak (2 tokens)
+ring|BSC|0x1f52328bcd533e969d114268cd3f1f3e762e4746|side|Tavern|held before KOL buy; sold 91 s (median) after it on 2 tokens; weak (2 tokens)
+ring|BSC|0xafd68c85fc1f88c3fe7d48fca127f6273951237f|side|0xAA|held before KOL buy; sold 116 s (median) after on 2 tokens; 1 no-buy sell; weak (2 tokens)
+ring|BSC|0x6f524b16b077c24f360ee9e661733c10e3c43fc2|side|0xAA|held before KOL buy; sold 118 s (median) after on 2 tokens; 2 no-buy sells; GMGN tag sandwich_bot; weak (2 tokens)
+ring|BSC|0x8e0f6784f7b8fa6327943f9beaf041e3a983b086|side|0xAA|held before KOL buy; sold 102 s (median) after on 2 tokens; 1 no-buy sell; GMGN tag bundler; weak (2 tokens)
+ring|Base|0xa017f839dd9be2a5ebc76e58cc34ef7a542fae6d|side|Cupsey|held before KOL buy; sold 10 s (median) after it on 3 tokens (RONNIE, TapMac, Keiki); seen around 2 KOLs
+ring|Base|0x48260a95ec90269512e76171f47df467660c9ee0|side|CoCo❕|held before KOL buy; sold 82 s (median) after on 2 tokens; weak (2 tokens)
+ring|Base|0xe2b03c5e7fa25927f92e27a9331e7daf5b72c029|side|西瓜🔶BNB|held before KOL buy; sold 73 s after on 2 tokens; 1 no-buy sell; GMGN tag creator; weak (2 tokens)
+ring|Base|0xf907877022b1e61232aca00661d6fb629b356d4c|side|letterbomb|held before KOL buy; sold 108 s after on 2 tokens; itself GMGN-tagged kol; weak (2 tokens)
+ring|BSC|0x9261c6780b8f9fb5a36eaf601389dd9537acad02|deployer|Serial deployer|deployed SICoin, 扎心, 牛逼; 97 GMGN rat_trader holders, 77 with no on-chain buy, $44.7K sold; seed team EB:B-T04 sold 牛逼 ($6K) 5 s after a KOL buy withou
+ring|BSC|0xdf2237114d595e0bf4d35cbcdebcdf43c55c4669|deployer|Serial deployer|deployed Doubao, SIC, ZERODAY; 121 rat_trader holders, 87 no-buy, $34.4K sold
+ring|Robinhood|0xaccf7803c88b05846c46946d7b46418a9adad578|deployer|Serial deployer|deployed CGT and OPENAI; 108 rat_trader holders, 92 no-buy, $49.1K sold
+ring|BSC|0x0fd35ec5ecbb70db9f163764c42a23f4bfbfb464|deployer|Serial deployer|deployed 你好猫, ELON2028, FDC; 21 rat_trader holders, all no-buy, $3.3K sold
+ring|BSC|0x403582c59c397b21924fa30ce514309aec054193|deployer|Serial deployer|deployed 安好猫, 妈咪, RM; 5 rat_trader holders
+ring|BSC|0xff7001e2f908617e4b92fd68fd195582b9b7cd75|deployer|Serial deployer|deployed SI and funded deployer 0x030d39fc (TAMA, 玄学) - a deployer chain
+ring|Base|0x3304e22ddaa22bcdc5fca2269b418046ae7b566a|funder|AntPositions; Ed_x|funded 3 Base deployers (0x815f1733: 🏔, BlockRunner; 0x0053bc8f: Everest; 0x34197381: bit)
