@@ -100,6 +100,7 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
   <button data-v="best">Best last 3 days</button>
   <button data-v="feed">Live feed</button>
   <button data-v="teams">Teams</button>
+  <button data-v="kols">KOLs</button>
   <button data-v="alerts">Alerts</button>
   <button data-v="new">Past $500K</button>
   <button data-v="how">How to read this</button>
@@ -116,7 +117,7 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
 const CH=['All','Solana','Robinhood','BSC','Base','Ethereum'];
 const GM={Solana:'sol',Robinhood:'robinhood',BSC:'bsc',Base:'base',Ethereum:'eth'};
 const DS={Solana:'solana',Robinhood:'robinhood',BSC:'bsc',Base:'base',Ethereum:'ethereum'};
-const VIEWS=['signals','hot','best','feed','teams','alerts','new','how'];
+const VIEWS=['signals','hot','best','feed','teams','kols','alerts','new','how'];
 const NTFY_TOPIC='insider-live-49ab55a62a52',NTFY_URL='https://ntfy.sh/'+NTFY_TOPIC;
 const PROVEN_GRADES=new Set(['Elite','Strong','Tested']);
 const AGE_MAX=72,FEED_MIN=100,HOT_MIN=200;
@@ -162,8 +163,8 @@ const rowsOf=x=>arr(x&&x.rows).filter(r=>r&&typeof r==='object');
 async function load(){
   if(loading)return;loading=true;
   try{
-    const [m,g,a,d,h,meta,s]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json','signals.json'].map(j));
-    D={moves:rowsOf(m).sort((x,y)=>(num(y.ts)||0)-(num(x.ts)||0)),groups:rowsOf(g),alerts:rowsOf(a),disc:rowsOf(d),hot:h?rowsOf(h):null,sig:s?rowsOf(s):null,meta:meta||{}};
+    const [m,g,a,d,h,meta,s,k]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json','signals.json','kols.json'].map(j));
+    D={moves:rowsOf(m).sort((x,y)=>(num(y.ts)||0)-(num(x.ts)||0)),groups:rowsOf(g),kols:rowsOf(k),alerts:rowsOf(a),disc:rowsOf(d),hot:h?rowsOf(h):null,sig:s?rowsOf(s):null,meta:meta||{}};
     GMAP=Object.fromEntries(D.groups.filter(x=>x.id!=null).map(x=>[x.id,x]));
     if(!D.hot)D.hot=buildHot();
     lastLoad=Date.now();
@@ -216,7 +217,7 @@ function kpis(){
   $('#kpis').innerHTML=[
     ['Buy signals in last 24h',D.sig?s24.length:'—',D.sig?'proven teams, real money, fresh tokens':'waiting for the scanner'],
     ['Proven-team buys in last 6h',b6.length+' · '+usd(b6.reduce((s,m)=>s+(num(m.usd)||0),0)),'$'+FEED_MIN+'+ buys only'],
-    ['Teams buying in last 24h',act.size+' of '+D.groups.filter(inChain).length,''],
+    ['Teams buying in last 24h',act.size+' of '+D.groups.filter(g=>g.kind!=='kol'&&inChain(g)).length,''],
     ['Picks up since first team buy (3d)',b3.length?Math.round(100*upN/b3.length)+'% of '+b3.length:'—','all teams, all sizes'],
   ].map(([k,v,s])=>`<div class="kpi"><span>${esc(k)}</span><b>${esc(v)}</b>${s?`<small>${esc(s)}</small>`:''}</div>`).join('');
 }
@@ -227,7 +228,7 @@ function render(keep){
   if(!lastLoad){$('#view').innerHTML='<div class="card empty">Loading the latest scan…</div>';return}
   const same=view===lastView,open=same?[...document.querySelectorAll('#view details[open]')].map(d=>d.dataset.id):[];
   const sc=$('#view .scroll'),st=keep&&same&&sc?sc.scrollTop:0;
-  try{({signals:vSignals,hot:vHot,best:vBest,feed:vFeed,teams:vTeams,alerts:vAlerts,new:vNew,how:vHow}[view]||vSignals)()}
+  try{({signals:vSignals,hot:vHot,best:vBest,feed:vFeed,teams:vTeams,kols:vKols,alerts:vAlerts,new:vNew,how:vHow}[view]||vSignals)()}
   catch(e){console.error(e);$('#view').innerHTML='<div class="card empty">Something in the data could not be shown on this tab. It will retry on the next refresh.</div>'}
   if(open.length)document.querySelectorAll('#view details').forEach(d=>{if(open.includes(d.dataset.id))d.open=true});
   const sc2=$('#view .scroll');if(sc2&&st)sc2.scrollTop=st;
@@ -337,7 +338,7 @@ function vTeams(){
   const t24=now()-86400;const act={};
   D.moves.forEach(m=>{if(m.side!=='buy')return;const ts=num(m.ts)||0;arr(m.groups).forEach(g=>{const a=act[g]||(act[g]={b24:0,u24:0,toks:new Set(),lb:null});if(!a.lb||ts>(num(a.lb.ts)||0))a.lb=m;if(ts>=t24){a.b24++;a.u24+=num(m.usd)||0;if(m.sym)a.toks.add(str(m.sym))}})});
   const order={Elite:0,Strong:1,Tested:2,Decent:3,Unproven:4};
-  const rows=D.groups.filter(g=>inChain(g)&&(!q||[g.nick,g.label,g.name,g.style,g.id,g.research_name,arr(g.wallets).map(w=>w&&w.w).join(' ')].map(str).join(' ').toLowerCase().includes(q)))
+  const rows=D.groups.filter(g=>g.kind!=='kol'&&inChain(g)&&(!q||[g.nick,g.label,g.name,g.style,g.id,g.research_name,arr(g.wallets).map(w=>w&&w.w).join(' ')].map(str).join(' ').toLowerCase().includes(q)))
     .sort((a,b)=>((act[b.id]?.b24||0)-(act[a.id]?.b24||0))||((num(act[b.id]?.lb?.ts)||0)-(num(act[a.id]?.lb?.ts)||0))||((order[a.grade]??5)-(order[b.grade]??5)));
   $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. Each team has a nickname so you can follow it, a style (how its wallets are linked) and a grade from its track record before we started watching. Tap a team to see its wallets.</p>
   <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th class="n hide-m">Track record</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
@@ -364,6 +365,34 @@ function vAlerts(){
 }
 
 /* ---------- New tokens ---------- */
+const KG={'Follow':['up','Copying their buys made money'],'Watch':['muted','Mixed: some calls work, most do not'],'Not enough data':['faint','Too few tested buys to judge'],"Don't follow":['down','Copying their buys lost money'],'Exit liquidity':['down','They are usually out before a follower can get in'],'Avoid: dump ring':['down','Wallets sell into their buyers (the Cupsey pattern)']};
+let kolG='all';
+function kolTag(g){const k=KG[g]||['faint',''];return`<span class="tag ${k[0]==='up'?'up':k[0]==='down'?'down':''}" title="${esc(k[1])}" style="${k[0]==='up'?'border-color:var(--green)':k[0]==='down'?'border-color:var(--red)':''}">${esc(g)}</span>`}
+function vKols(){
+  const all=arr(D.kols).filter(r=>inChain(r)&&(!q||[r.name,r.twitter,arr(r.wallets).join(' ')].map(str).join(' ').toLowerCase().includes(q)));
+  const cnts={};all.forEach(r=>cnts[r.grade]=(cnts[r.grade]||0)+1);
+  const rows=all.filter(r=>kolG==='all'||r.grade===kolG);
+  const t6=now()-6*3600;
+  const now6=[];all.filter(r=>r.grade==='Follow'||r.grade==='Watch').forEach(r=>arr(r.recent).forEach(b=>{if((num(b.ts)||0)>=t6)now6.push({...b,kol:r})}));
+  now6.sort((a,b)=>(num(b.ts)||0)-(num(a.ts)||0));
+  const R=(x,k)=>num((x||{})[k]);
+  $('#view').innerHTML=`<p class="lead"><b>Should you follow this KOL?</b> For each KOL we took their last 30 days of buys and simulated copying each one 5 minutes later, then selling 1 minute after they sold (or after 6 hours). We also checked whether wallets sell into their buyers the moment they buy, which is the Cupsey pattern. Since they started being tracked live, every buy is also re-checked 1 hour and 6 hours later, so grades can move. The numbers shown include no fees or slippage; grades subtract 3% per trade for them. Real results will be worse. Not financial advice.</p>
+  <div class="bar seg">${['all',...KOL_ORDER].map(g=>`<button data-k="${esc(g)}" class="${kolG===g?'on':''}">${g==='all'?'All':esc(g)} (${g==='all'?all.length:(cnts[g]||0)})</button>`).join('')}</div>
+  ${now6.length?`<div class="card" style="margin-bottom:12px;padding:10px 12px"><b>Bought in the last 6h by KOLs graded Follow or Watch</b><div style="margin-top:6px">${now6.slice(0,12).map(b=>`<div style="padding:3px 0">${tokLink({chain:b.kol.chain,ca:b.ca,sym:b.sym})} ${riskTag(b)} <span class="muted">by ${esc(b.kol.name)} · ${usd(b.usd)} at ${usd(b.mc)} mcap · ${ago(b.ts)}${num(b.mc_now)&&num(b.mc)?' · now '+pct(num(b.mc_now)/num(b.mc)-1):''}</span></div>`).join('')}</div></div>`:''}
+  <div class="card scroll"><table><thead><tr><th>KOL</th><th>Grade</th><th class="n">Copy result (30d)</th><th class="n hide-m">Win rate</th><th class="n hide-m">Out before you</th><th class="n hide-m">Live 1h after buy</th><th class="hide-m">Last buy</th></tr></thead><tbody>
+  ${rows.map(r=>{const x=r.research||{},L=r.live||{};return`<tr><td><details data-id="${esc(r.id)}"><summary><b>${esc(r.name)}</b>${r.twitter?` <a class="muted" href="https://x.com/${encodeURIComponent(str(r.twitter))}" target="_blank" rel="noopener">@${esc(r.twitter)}</a>`:''}<div class="chain">${esc(r.chain)} · ${plural(arr(r.wallets).length,'wallet')}${cnt(r.buys_3d)?' · '+cnt(r.buys_3d)+' buys in 3d':''}</div></summary>
+    <div style="margin-top:6px;font-size:13px">${arr(r.why).map(w=>`<div>• ${esc(w)}</div>`).join('')}</div>
+    <div class="faint" style="font-size:12px;margin-top:6px">Research: ${cnt(x.n)} buys tested · copy 1 min late ${pct(R(x,'copy1_mean'))} avg · 5 min late ${pct(R(x,'copy5_mean'))} avg, ${pct(R(x,'copy5_median'))} median · held 1h ${pct(R(x,'h1_median'))} median · 2x+ peak on ${R(x,'share_2x')!=null?Math.round(R(x,'share_2x')*100)+'%':'—'} · they hold ${R(x,'hold_min')!=null?ageFmt(R(x,'hold_min')/60):'—'} (median) · their 30d PnL ${usd(R(x,'pnl_30d'))}${x.ring?` · ring check: ${esc(x.ring)}`:''}</div>
+    ${arr(r.recent).length?`<div style="margin-top:6px">${arr(r.recent).map(b=>`<div style="font-size:12px">${tokLink({chain:r.chain,ca:b.ca,sym:b.sym})} ${riskTag(b)} <span class="muted">${usd(b.usd)} at ${usd(b.mc)} · ${ago(b.ts)}${num(b.mc_now)&&num(b.mc)?' · now '+pct(num(b.mc_now)/num(b.mc)-1):''}</span></div>`).join('')}</div>`:''}
+    <div class="faint" style="font-size:11px;margin-top:4px;word-break:break-all">${arr(r.wallets).map(esc).join(' · ')}</div></details></td>
+    <td>${kolTag(r.grade)}</td><td class="n">${pct(R(x,'copy5_mean'))}<div class="chain">${cnt(x.n)?cnt(x.n)+' buys':''}</div></td>
+    <td class="n hide-m">${R(x,'win')!=null?Math.round(R(x,'win')*100)+'%':'—'}</td>
+    <td class="n hide-m">${R(x,'sold_first')!=null?Math.round(R(x,'sold_first')*100)+'%':'—'}</td>
+    <td class="n hide-m">${L.n1?pct(L.med1)+`<div class="chain">${cnt(L.n1)} buys</div>`:'<span class="faint">—</span>'}</td>
+    <td class="hide-m">${ago(r.last_buy)}</td></tr>`}).join('')||(arr(D.kols).length?'<tr><td colspan="7" class="empty">No KOLs match.</td></tr>':'<tr><td colspan="7" class="empty">KOL grades are being researched and will appear here soon.</td></tr>')}
+  </tbody></table></div>`;
+}
+const KOL_ORDER=['Follow','Watch','Not enough data',"Don't follow",'Exit liquidity','Avoid: dump ring'];
 function vNew(){
   const all0=D.disc.filter(r=>inChain(r)&&match(r)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const rows=all.filter(r=>newAll||arr(r.first_buys).length).sort((x,y)=>(num(y.created)||0)-(num(x.created)||0));
@@ -395,6 +424,7 @@ function vHow(){
   $('#view').innerHTML=`<div class="note">
   <p><b>Buy signals (start here).</b> A signal fires only when <b>proven teams</b> (grade Elite, Strong or Tested, or ★) put <b>real money</b> into a <b>fresh token</b>: every buy counted is at least $50, and together they add up to $300+ from 2 or more wallets or teams, or there is one single buy of $500+. The token must be under 24 hours old, not already fading, and the teams must not be selling (their sells less than half their buys). Signals are rare on purpose. Each card shows how old the token was when flagged, how long ago it was flagged, market cap then and now, and the best it has done since.</p>
   <p><b>Scam filter.</b> Every token is checked before it can become a buy signal: at least $10K of real liquidity, market cap not more than 100x the liquidity, 100+ holders, the top 10 wallets holding no more than 75%, not a honeypot (you can sell), and on Solana the creator cannot mint more or freeze wallets. Tokens that fail are hidden on every tab (the Live feed too) and never sent to your phone. Each tab has a button to show them, marked ⚠ with the reason.</p>
+  <p><b>KOLs tab.</b> Grades public KOLs on one question: would copying their buys have made you money? Follow: copying them 5 minutes late made money on average and won at least about a third of the time. Watch: break-even or mixed. Don't follow: copying them lost money. Exit liquidity: they usually sell before you could get in, so their followers are who they sell to. Avoid (dump ring): wallets were caught selling into their buyers. KOL wallets never trigger buy signals on their own.</p>
   <p><b>Follow score.</b> The team grade comes from the research: how often a team was early on tokens that later ran. Our backtest of 676 team buys over 3 days found that grade does not tell you whether copying the team makes money. Teams that are always early include the ones that dump on their followers. So every team also gets a live <b>Follow</b> score: the median change in market cap since each of its buys in the last 3 days. A buy signal now needs at least one proven team whose Follow score is zero or better over 5+ buys.</p>
   <p><b>Dump rings (the Cupsey pattern).</b> Some wallets buy a token before a KOL calls it, or are sent tokens by the deployer, then sell into the followers the moment the KOL buys. Teams caught doing this are marked ⚠ on the Teams tab and never trigger buy signals. This is checked live: a team that sells tokens it never bought gets flagged automatically. Known KOL dump-ring wallets (Cupsey's side wallets and others we found) are watched too. Any token they touch, or that insiders dump without ever buying, is marked ⚠ and blocked from signals.</p>
   <p><b>No spam.</b> Small test buys and buys by unproven teams are left out by default everywhere: the Live feed shows proven-team buys of $${FEED_MIN}+ only, and Hot now only shows a token if a proven team put in $${HOT_MIN}+ in the last 6 hours or 2+ proven teams are in. Each has a button to show everything.</p>
@@ -424,7 +454,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)r
   else if(d.f){feedAll=d.f==='all';render()}
   else if(d.s){hotSmall=!hotSmall;render()}
   else if(d.n){newAll=d.n==='all';render()}
-  else if(d.r){showRisky=!showRisky;render()}});
+  else if(d.r){showRisky=!showRisky;render()}
+  else if(d.k){kolG=d.k;render()}});
 let qT=0;$('#q').addEventListener('input',e=>{clearTimeout(qT);const v=e.target.value.trim().toLowerCase();qT=setTimeout(()=>{if(v!==q){q=v;render()}},120)});
 window.addEventListener('hashchange',()=>{const v=location.hash.slice(1);if(VIEWS.includes(v)&&v!==view){view=v;render()}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastLoad>110000)load()});
