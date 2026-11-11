@@ -22,10 +22,12 @@ ERRORS = []
 
 TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 EVM = {
-    'BSC':       dict(gt='bsc', block_s=0.75, max_range=2000, back=2400,
-                      rpcs=['https://bsc-rpc.publicnode.com', 'https://bsc.drpc.org', 'https://binance.llamarpc.com']),
-    'Base':      dict(gt='base', block_s=2.0, max_range=2000, back=900,
-                      rpcs=['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.drpc.org']),
+    'BSC':       dict(gt='bsc', block_s=0.45, max_range=2000, back=2400,
+                      rpcs=['https://bsc-rpc.publicnode.com', 'https://bsc.drpc.org', 'https://binance.llamarpc.com'],
+                      wide=['https://1rpc.io/bnb', 'https://bsc.drpc.org'], wide_range=50),
+    'Base':      dict(gt='base', block_s=0.2, max_range=2000, back=900,
+                      rpcs=['https://base-rpc.publicnode.com', 'https://mainnet.base.org', 'https://base.drpc.org'],
+                      wide=['https://1rpc.io/base', 'https://base.drpc.org'], wide_range=50),
     'Ethereum':  dict(gt='eth', block_s=12.0, max_range=500, back=150,
                       rpcs=['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org', 'https://eth.llamarpc.com']),
     'Robinhood': dict(gt='robinhood', block_s=0.106, max_range=10000, back=12000,
@@ -336,6 +338,52 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
     cur['range'] = rng
     cur['head'] = head
     cur['at'] = NOW
+    _evm_moves(chain, cfg, rpc, logs, wset, newmoves)
+
+
+def scan_evm_wide(chain, cfg, wallets, st, newmoves):
+    """Every token a watched wallet receives, with no contract list: small block windows on public endpoints
+    that allow wallet-only log filters. This is what catches a team buying a brand-new launch on BSC / Base."""
+    if not wallets or not cfg.get('wide'):
+        return
+    rpc = RPC(chain + ' wide', cfg['wide'], gap=0.25)
+    cur = st.setdefault('evm', {}).setdefault(chain, {})
+    try:
+        head = int(rpc.call('eth_blockNumber', []), 16)
+    except Exception as e:
+        ERRORS.append(f'{chain} wide: no RPC ({str(e)[:60]})')
+        return
+    start = cur.get('wlast', head - int(600 / cfg['block_s'])) + 1
+    max_lag = int(2400 / cfg['block_s'])              # a buy more than ~40 min old is not worth chasing
+    if head - start > max_lag:
+        start = head - max_lag
+    wl = sorted(wallets)
+    wset = set(wl)
+    tops = [topic(w) for w in wl]
+    step = cfg.get('wide_range', 50)
+    logs, fails = [], 0
+    b = start
+    t_end = time.time() + min(90, max(20, (left() - SCAN_RESERVE) / 3))
+    while b <= head and left() > SCAN_RESERVE and time.time() < t_end and fails < 4:
+        e = min(head, b + step - 1)
+        try:
+            got = []
+            for i in range(0, len(tops), 30):           # public endpoints cap topics per filter
+                got += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e),
+                                                 'topics': [TRANSFER, None, tops[i:i + 30]]}]) or []
+            logs += got
+            cur['wlast'] = e
+            b = e + 1
+        except Exception as ex:
+            fails += 1
+            if fails == 1:
+                ERRORS.append(f'{chain} wide getLogs: {str(ex)[:90]}')
+            time.sleep(1.5)
+    cur['wide_behind_s'] = int((head - cur.get('wlast', head)) * cfg['block_s'])
+    _evm_moves(chain, cfg, rpc, logs, wset, newmoves)
+
+
+def _evm_moves(chain, cfg, rpc, logs, wset, newmoves):
     if not logs:
         return
     # timestamps: interpolate between the first and last block we fetched
@@ -1180,6 +1228,11 @@ def main():
             elif chain in BLOCKSCOUT:
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
             elif chain in ('BSC', 'Base'):
+                try:
+                    wide = sorted(w.lower() for w in proven.get(chain, ()))[:90]   # best teams only: these calls are slow
+                    scan_evm_wide(chain, EVM[chain], wide, st, newmoves)
+                except Exception as e:
+                    ERRORS.append(f'{chain} wide: {type(e).__name__} {str(e)[:80]}')
                 scan_evm(chain, EVM[chain], [w.lower() for w in watch.get(chain, {})], st, newmoves,
                          contracts=bsc_contracts(st, moves, chain))
             else:
