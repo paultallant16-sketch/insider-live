@@ -32,6 +32,7 @@ EVM = {
                       rpcs=['https://rpc.mainnet.chain.robinhood.com', 'https://rpc.nodeflare.app/robinhood/public']),
 }
 SOL_RPCS = ['https://api.mainnet-beta.solana.com', 'https://solana-rpc.publicnode.com']
+SOL_RPCS_GAP = [('https://api.mainnet-beta.solana.com', 0.3), ('https://solana-rpc.publicnode.com', 0.12)]
 GT_NET = {'Solana': 'solana', 'BSC': 'bsc', 'Base': 'base', 'Ethereum': 'eth', 'Robinhood': 'robinhood'}
 # quote / base assets: a transfer of these is money moving, not a token pick
 BASE_SYMBOLS = {'WETH', 'ETH', 'WBNB', 'BNB', 'USDC', 'USDT', 'DAI', 'BUSD', 'FDUSD', 'USD1', 'USDE', 'TUSD',
@@ -211,6 +212,7 @@ def token_extra(info):
 
 # ---------------------------------------------------------------- is this a real, tradable coin?
 SAFE_TTL = 6 * 3600
+RISK_TOK = {}           # 'chain|ca' -> reasons found this pass (KOL dump ring active, insiders dumping sent tokens)
 SAFE_CALLS = [0]
 
 
@@ -238,7 +240,7 @@ def safety(chain, ca, st, budget=14):
     return row
 
 
-def tradable(info, sf, strict=True):
+def tradable(info, sf, strict=True, key=None):
     """(ok, reasons). Fails closed only on hard evidence; unknown holder data is not a pass for buy signals."""
     why = []
     liq, mc = info.get('liq'), info.get('mc')
@@ -249,6 +251,8 @@ def tradable(info, sf, strict=True):
         why.append('liquidity under $10K')
     elif mc and mc > 100 * liq:
         why.append('market cap far above liquidity')
+    if key and key in RISK_TOK:
+        why.extend(RISK_TOK[key])
     if sf:
         if sf.get('honeypot') is True:
             why.append("honeypot: can't sell")
@@ -473,100 +477,123 @@ def bsc_contracts(st, moves, chain='BSC'):
 
 
 # ---------------------------------------------------------------- Solana
+def _sol_parse(w, s, tx, wset, newmoves):
+    """One Solana transaction -> buy / sell / internal moves for wallet w."""
+    m = tx['meta']
+    ts = tx.get('blockTime') or s.get('blockTime') or NOW
+    own = {}                             # (owner, mint) -> balance change, for every watched owner
+    for sgn, arr in ((-1, m.get('preTokenBalances') or []), (1, m.get('postTokenBalances') or [])):
+        for b in arr:
+            o = b.get('owner')
+            if o in wset:
+                amt = _f((b.get('uiTokenAmount') or {}).get('uiAmountString')) or 0.0
+                own[(o, b['mint'])] = own.get((o, b['mint']), 0.0) + sgn * amt
+    d = {mint: v for (o, mint), v in own.items() if o == w}
+    sol_delta = 0.0
+    try:
+        keys = [k['pubkey'] if isinstance(k, dict) else k for k in tx['transaction']['message']['accountKeys']]
+        i = keys.index(w)
+        sol_delta = (m['postBalances'][i] - m['preBalances'][i]) / 1e9
+    except Exception:
+        pass
+    picks = [k for k, v in d.items() if k not in SOL_BASE_MINTS and abs(v) > 1e-12]
+    one = len(picks) == 1                # only value a plain one-token swap
+    base_sol = sol_delta + d.get(WSOL, 0.0)
+    base_usd = sum(d.get(k, 0.0) for k in STABLES)
+    for mint in picks:
+        delta = d[mint]
+        opp = any(o != w and mm == mint and v * delta < 0 for (o, mm), v in own.items())
+        side = 'internal' if opp else ('buy' if delta > 0 else 'sell')
+        newmoves.append(dict(chain='Solana', wallet=w, ts=ts, side=side, ca=mint, amount=abs(delta),
+                             sol=base_sol if one else 0.0, stable=base_usd if one else 0.0,
+                             tx=s['signature']))
+
+
+def _sol_pool(jobs, fn, deadline):
+    """Run fn(rpc, job) over jobs with one worker per public endpoint (each has its own rate limit)."""
+    import threading
+    q = list(jobs)
+    lock = threading.Lock()
+    fails = [0]
+
+    def worker(url, gap):
+        rpc = RPC('Solana', [url], gap=gap)
+        while True:
+            if left() < 75 or time.time() > deadline or fails[0] > 25:
+                return
+            with lock:
+                if not q:
+                    return
+                job = q.pop(0)
+            try:
+                fn(rpc, job)
+            except Exception as e:
+                with lock:
+                    fails[0] += 1
+                    if fails[0] in (1, 10):
+                        ERRORS.append(f'Solana {url.split("/")[2][:20]}: {str(e)[:70]}')
+                time.sleep(1.0)
+    ts = [threading.Thread(target=worker, args=(u, g), daemon=True) for u, g in SOL_RPCS_GAP]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(max(1, deadline - time.time() + 20))
+    return q                                           # jobs not reached this pass
+
+
 def scan_solana(wallets, st, newmoves, priority=(), deadline=None):
-    """Proven wallets first, then a rotating slice of the rest. Each trade is valued from the money that
-    actually left or entered the wallet (native SOL + WSOL, or USDC/USDT), and transfers between two watched
-    wallets are marked internal so a funder topping up its crew is never read as buying."""
+    """Freshness first. Step 1: list the latest signatures of every watched wallet (proven ones first), spread
+    over several public endpoints at once. Step 2: open the new transactions newest-first until time runs out.
+    A busy bot wallet only gets its newest few looked at: an hours-late trade is no use to anyone following."""
     if not wallets:
         return
     deadline = deadline or (time.time() + left())
-    rpc = RPC('Solana', SOL_RPCS, gap=0.2)
     cur = st.setdefault('sol', {})
-    last = cur.setdefault('last', {})
+    cur.pop('last', None)                              # old single-bookmark format
+    seen = cur.setdefault('seen', {})                  # wallet -> recent signatures already handled
     wset = set(wallets)
     pri = [w for w in sorted(set(priority)) if w in wset]
     rest = sorted(wset - set(pri))
     pos = cur.get('pos', 0) % max(1, len(rest))
-    order = pri + rest[pos:] + rest[:pos]        # proven wallets first, every pass
-    done = fails = rest_done = 0
-    for w in order:
-        if left() < 90 or time.time() > deadline:
-            break
-        try:
-            if last.get(w):
-                sigs, before = [], None          # page back to the bookmark so busy wallets lose nothing
-                while True:
-                    p = {'limit': 100, 'until': last[w]}
-                    if before:
-                        p['before'] = before
-                    page = rpc.call('getSignaturesForAddress', [w, p]) or []
-                    sigs += page
-                    if len(page) < 100 or len(sigs) >= 300:
-                        break
-                    before = page[-1]['signature']
-            else:
-                sigs = rpc.call('getSignaturesForAddress', [w, {'limit': 3}]) or []   # first sight: latest few
-        except Exception as e:
-            msg = str(e)
-            if '-32020' in msg:
-                last.pop(w, None)        # bookmark too old for this node: restart this wallet from its latest
-                continue
-            fails += 1
-            if fails == 1:
-                ERRORS.append(f'Solana sigs: {msg[:80]}')
-            if fails >= 6:
-                break
-            time.sleep(3)
-            continue
-        done += 1
-        if w not in pri:
-            rest_done += 1
-        for s in reversed(sigs):                 # oldest first; the bookmark only moves past what we read
-            if left() < 60 or time.time() > deadline + 15:
-                break
-            if s.get('err'):
-                last[w] = s['signature']
-                continue
-            try:
-                tx = rpc.call('getTransaction', [s['signature'], {'encoding': 'jsonParsed',
-                                                                   'maxSupportedTransactionVersion': 0}])
-            except Exception:
-                break                            # retry this one next pass
-            if not tx or not tx.get('meta'):
-                break                            # node has not got it yet; retry next pass
-            last[w] = s['signature']
-            m = tx['meta']
-            ts = tx.get('blockTime') or NOW
-            own = {}                             # (owner, mint) -> balance change, for every watched owner
-            for sgn, arr in ((-1, m.get('preTokenBalances') or []), (1, m.get('postTokenBalances') or [])):
-                for b in arr:
-                    o = b.get('owner')
-                    if o in wset:
-                        amt = _f((b.get('uiTokenAmount') or {}).get('uiAmountString')) or 0.0
-                        own[(o, b['mint'])] = own.get((o, b['mint']), 0.0) + sgn * amt
-            d = {mint: v for (o, mint), v in own.items() if o == w}
-            sol_delta = 0.0
-            try:
-                keys = [k['pubkey'] if isinstance(k, dict) else k for k in tx['transaction']['message']['accountKeys']]
-                i = keys.index(w)
-                sol_delta = (m['postBalances'][i] - m['preBalances'][i]) / 1e9
-            except Exception:
-                pass
-            picks = [k for k, v in d.items() if k not in SOL_BASE_MINTS and abs(v) > 1e-12]
-            one = len(picks) == 1                # only value a plain one-token swap
-            base_sol = sol_delta + d.get(WSOL, 0.0)
-            base_usd = sum(d.get(k, 0.0) for k in STABLES)
-            for mint in picks:
-                delta = d[mint]
-                opp = any(o != w and mm == mint and v * delta < 0 for (o, mm), v in own.items())
-                side = 'internal' if opp else ('buy' if delta > 0 else 'sell')
-                newmoves.append(dict(chain='Solana', wallet=w, ts=ts, side=side, ca=mint, amount=abs(delta),
-                                     sol=base_sol if one else 0.0, stable=base_usd if one else 0.0,
-                                     tx=s['signature']))
+    order = pri + rest[pos:] + rest[:pos]
+    lists = {}
+
+    def get_sigs(rpc, w):
+        lists[w] = rpc.call('getSignaturesForAddress', [w, {'limit': 25}], tries=2) or []
+    left_over = _sol_pool(order, get_sigs, time.time() + 0.45 * max(30, deadline - time.time()))
+    listed = [w for w in order if w in lists]
+    jobs, busy = [], 0
+    for w in listed:
+        sigs = lists[w]
+        have = set(seen.get(w) or [])
+        first = not have
+        fresh = [s for s in sigs if s['signature'] not in have and not s.get('err')
+                 and (s.get('blockTime') or NOW) >= NOW - 6 * 3600]
+        if first:
+            fresh = [s for s in fresh if (s.get('blockTime') or 0) >= NOW - 1800]
+        if len(fresh) >= 25:
+            busy += 1
+            fresh = fresh[:8]                          # bot-like wallet: newest few only
+        done = [s['signature'] for s in sigs if s not in fresh]
+        seen[w] = (done + list(have))[:80]
+        jobs += [(s.get('blockTime') or NOW, w, s) for s in fresh]
+    jobs.sort(key=lambda j: -j[0])                     # newest first
+
+    def get_tx(rpc, job):
+        _, w, s = job
+        tx = rpc.call('getTransaction', [s['signature'], {'encoding': 'jsonParsed',
+                                                         'maxSupportedTransactionVersion': 0}], tries=2)
+        if tx and tx.get('meta'):
+            _sol_parse(w, s, tx, wset, newmoves)
+            seen[w] = [s['signature']] + (seen.get(w) or [])[:79]
+    not_done = _sol_pool(jobs, get_tx, deadline)
+    rest_done = sum(1 for w in listed if w not in pri)
     cur['pos'] = (pos + rest_done) % max(1, len(rest))
-    cur['covered'] = done
-    cur['of'] = len(order)
-    cur['at'] = NOW
+    cur.update(covered=len(listed), of=len(order), txs=len(jobs) - len(not_done), tx_left=len(not_done),
+               busy=busy, at=NOW)
+    for w in list(seen):
+        if w not in wset:
+            seen.pop(w)
 
 
 # ---------------------------------------------------------------- discovery
@@ -924,18 +951,113 @@ def load_seed():
     return label_groups(groups), watch
 
 
+def load_flags(groups, watch):
+    """data/flags.txt from the research:
+         team|<group id>|<label>|<reason>          a seed team caught dumping on followers: never drives signals
+         ring|<chain>|<wallet>|<role>|<ring name>|<note>   KOL dump-ring wallets: watched, never followed"""
+    path = os.path.join(DATA, 'flags.txt')
+    if not os.path.exists(path):
+        return
+    byid = {g['id']: g for g in groups}
+    rings = {}
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            p = line.rstrip('\n').split('|')
+            if p[0] == 'team' and len(p) >= 4 and p[1] in byid:
+                byid[p[1]].update(flag=p[2], flag_reason=p[3], flag_src='research')
+            elif p[0] == 'ring' and len(p) >= 6:
+                chain, w, role, name, note = p[1], p[2], p[3], p[4], p[5]
+                if chain != 'Solana':
+                    w = w.lower()
+                gid = 'RING:' + (re.sub(r'[^A-Za-z0-9]+', '', name)[:20] or 'x') + f'-{zlib.crc32(name.encode()) % 1000:03d}'
+                g = rings.get((chain, gid))
+                if not g:
+                    g = rings[(chain, gid)] = dict(id=gid, chain=chain, kind='ring', tier='R', name=name, n=0,
+                                                   winners=0, failed=0, profit=0, seed_last_ts=None, wallets=[],
+                                                   legit=0, nick=f'{name} ring', style='KOL dump ring',
+                                                   about=note, grade='Ring', hit=0, label=f'{name} ring · KOL dump ring',
+                                                   short=f"{name} ring ({CHAIN_SHORT.get(chain, chain)})",
+                                                   research_name=name, flag='KOL dump ring',
+                                                   flag_reason=note)
+                g['wallets'].append(dict(w=w, role=role))
+                g['n'] = len(g['wallets'])
+                lst = watch.setdefault(chain, {}).setdefault(w, [])
+                if gid not in lst:
+                    lst.append(gid)
+    groups.extend(rings.values())
+
+
+def auto_flags(groups, moves, tokens):
+    """Live check of the Cupsey pattern inside our own teams: selling tokens the team never bought (they were
+    sent in by a deployer or an operational wallet) on tokens launched while we were watching."""
+    if not moves:
+        return
+    t0 = min(m['ts'] for m in moves)
+    got, recv, sold = set(), {}, {}
+    for m in sorted(moves, key=lambda m: m['ts']):
+        key = (m['wallet'], m['chain'], m['ca'])
+        if m['side'] in ('buy', 'internal'):
+            got.add(key)
+            continue
+        ti = tokens.get(f"{m['chain']}|{m['ca']}") or {}
+        cr = ti.get('created')
+        if not cr or cr < t0 + 600 or (ti.get('mc') or 0) > 50_000_000:
+            continue                                  # older than our data (buy may be before it), or a big minted asset
+        for g in m['groups']:
+            sold[g] = sold.get(g, 0) + (m.get('usd') or 0)
+            if key not in got:
+                recv[g] = recv.get(g, 0) + (m.get('usd') or 0)
+    for g in groups:
+        r, s_ = recv.get(g['id'], 0), sold.get(g['id'], 0)
+        g['recv_sold_usd'] = round(r)
+        if not g.get('flag') and r >= 3000 and s_ and r / s_ >= 0.5:
+            g.update(flag='Dumps tokens it never bought',
+                     flag_reason=f'${r:,.0f} of its ${s_:,.0f} sells on new tokens were tokens sent to it, not bought '
+                                 f'(the Cupsey side-wallet pattern)', flag_src='live')
+
+
+def risk_tokens(moves, gmap, tokens):
+    """Per token: a KOL dump ring touched it in the last 24h, or watched wallets dumped $2K+ of it in the last
+    6h without ever buying it."""
+    RISK_TOK.clear()
+    if not moves:
+        return
+    t0 = min(m['ts'] for m in moves)
+    got, dump = set(), {}
+    for m in sorted(moves, key=lambda m: m['ts']):
+        k = f"{m['chain']}|{m['ca']}"
+        ring = [gmap[g]['name'] for g in m['groups'] if g in gmap and gmap[g].get('kind') == 'ring']
+        if ring and NOW - m['ts'] < 86400:
+            why = f'KOL dump ring active ({ring[0]})'
+            if why not in RISK_TOK.setdefault(k, []):
+                RISK_TOK[k].append(why)
+        key = (m['wallet'], k)
+        if m['side'] in ('buy', 'internal'):
+            got.add(key)
+        elif m['side'] == 'sell' and key not in got and NOW - m['ts'] < 6 * 3600:
+            cr = (tokens.get(k) or {}).get('created') or 0
+            if cr > t0 + 600:                         # launched while we were watching: no hidden earlier buy
+                dump[k] = dump.get(k, 0) + (m.get('usd') or 0)
+    for k, v in dump.items():
+        if v >= 2000:
+            RISK_TOK.setdefault(k, []).append(f'insiders dumping ${v:,.0f} of tokens they never bought')
+
+
 # ---------------------------------------------------------------- main
 def main():
     groups, watch = load_seed()                              # teams + wallets from the research
+    load_flags(groups, watch)                                # research flags + KOL dump-ring wallets
     st = load(os.path.join(DATA, 'state.json'), {})
     tokens = st.setdefault('tokens', {})
     moves = load(os.path.join(OUT, 'moves.json'), {}).get('rows', [])
+    auto_flags(groups, moves, tokens)
     alerts = load(os.path.join(OUT, 'alerts.json'), {}).get('rows', [])
     disc = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'discovery.json'), {}).get('rows', [])}
 
     newmoves = []
     # proven = graded Elite/Strong/Tested or early on a lasting token; these drive buy signals
-    good_ids = {g['id'] for g in groups if g['grade'] in ('Elite', 'Strong', 'Tested') or g.get('legit')}
+    good_ids = {g['id'] for g in groups if (g['grade'] in ('Elite', 'Strong', 'Tested') or g.get('legit'))
+                and not g.get('flag')}                       # flagged dumpers and rings never drive signals
     proven = {}
     for chain, ws in watch.items():
         proven[chain] = {w for w, gids in ws.items() if any(x in good_ids for x in gids)}
@@ -1016,6 +1138,7 @@ def main():
     moves = [m for m in moves if m['ts'] >= cut]
     moves.sort(key=lambda m: -m['ts'])
     moves = moves[:6000]
+    risk_tokens(moves, {g['id']: g for g in groups}, tokens)
 
     # group status from the freshest move
     gl = {}
@@ -1080,7 +1203,7 @@ def main():
         info = tokens.get(f"{a['chain']}|{a['ca']}") or {}
         if info:
             a.update(token_extra(info))
-            ok, why = tradable(info, (st.get('safe') or {}).get(f"{a['chain']}|{a['ca']}"))
+            ok, why = tradable(info, (st.get('safe') or {}).get(f"{a['chain']}|{a['ca']}"), key=f"{a['chain']}|{a['ca']}")
             a.update(tradable=ok, risk=why)
         if info.get('mc'):
             a['mc_now'] = info['mc']
@@ -1127,7 +1250,7 @@ def main():
         sf = (st.get('safe') or {}).get(f"{h['chain']}|{h['ca']}")
         if not sf and any(g in good_ids for g in h['groups_6h']) and h['buys_6h']:
             sf = safety(h['chain'], h['ca'], st)
-        ok, why = tradable(info, sf)
+        ok, why = tradable(info, sf, key=f"{h['chain']}|{h['ca']}")
         hrows.append(dict(tradable=ok, risk=why, holders=(sf or {}).get('holders'), top10=(sf or {}).get('top10'),
                           chain=h['chain'], ca=h['ca'], sym=info.get('sym') or h['sym'], first_buy=h['first_buy'],
                           last=h['last'], last_buy=h.get('last_buy'), mc_first=h['mc_first'], mc_now=mc_now,
@@ -1176,7 +1299,7 @@ def main():
         if sym0 in BASE_SYMBOLS or 'USD' in sym0:
             continue                                  # stablecoins and base coins are not launches
         sf = safety(c['chain'], c['ca'], st)
-        ok, why = tradable(info, sf)
+        ok, why = tradable(info, sf, key=k)
         if not ok or not sf:
             continue                                  # never signal a coin we cannot show is real and sellable
         strong = (c['buy'] >= 300 and len(c['wallets']) >= 2) or c['big'] >= 500
@@ -1211,7 +1334,7 @@ def main():
         if info and not sf and NOW - r['first_signal'] < 86400:
             sf = safety(r['chain'], r['ca'], st)
         if info:
-            ok, why = tradable(info, sf)
+            ok, why = tradable(info, sf, key=k)
             r.update(tradable=ok and bool(sf), risk=why if why or sf else ['holder data not checked yet'],
                      holders=(sf or {}).get('holders'), top10=(sf or {}).get('top10'))
         sym0 = (r.get('sym') or '').upper()
@@ -1315,7 +1438,7 @@ def main():
         sf = (st.get('safe') or {}).get(f"{r['chain']}|{r['ca']}")
         if r.get('first_buys') and not sf:
             sf = safety(r['chain'], r['ca'], st, budget=20)   # tokens our teams bought get checked first
-        ok, why = tradable(dict(liq=r.get('liq'), mc=r.get('mc')), sf, strict=False)
+        ok, why = tradable(dict(liq=r.get('liq'), mc=r.get('mc')), sf, strict=False, key=f"{r['chain']}|{r['ca']}")
         r.update(tradable=ok, risk=why)
     drows.sort(key=lambda r: (-(r.get('created') or 0)))
     st['safe'] = {k: v for k, v in (st.get('safe') or {}).items() if NOW - v.get('at', 0) < 3 * 86400}
