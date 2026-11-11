@@ -39,7 +39,7 @@ BASE_SYMBOLS = {'WETH', 'ETH', 'WBNB', 'BNB', 'USDC', 'USDT', 'DAI', 'BUSD', 'FD
 WSOL = 'So11111111111111111111111111111111111111112'
 STABLES = {'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF8KAQoQGyFw53xcjjZzdKgcqfTsQ'}
 SOL_BASE_MINTS = {WSOL} | STABLES
-SCAN_RESERVE = 150      # seconds kept back after the chain scans for prices, alerts, signals and discovery
+SCAN_RESERVE = 200      # seconds kept back after the chain scans for prices, alerts, signals and discovery
 
 
 def left():
@@ -207,6 +207,60 @@ def token_extra(info):
     return dict(state=state, age_h=round(age_h, 1) if age_h is not None else None, created=info.get('created'),
                 ch1=info.get('ch1'), ch6=info.get('ch6'), ch24=info.get('ch24'), vol24=info.get('vol24'),
                 peak=info.get('peak'))
+
+
+# ---------------------------------------------------------------- is this a real, tradable coin?
+SAFE_TTL = 6 * 3600
+SAFE_CALLS = [0]
+
+
+def safety(chain, ca, st, budget=14):
+    """Holder spread and sell checks from GeckoTerminal's token info, cached for 6 hours per token."""
+    sc = st.setdefault('safe', {})
+    key = f'{chain}|{ca}'
+    row = sc.get(key)
+    if row and NOW - row.get('at', 0) < SAFE_TTL:
+        return row
+    if SAFE_CALLS[0] >= budget or left() < 30:
+        return row
+    SAFE_CALLS[0] += 1
+    r = GT.get(f'/networks/{GT_NET[chain]}/tokens/{ca}/info')
+    a = ((r or {}).get('data') or {}).get('attributes') or {}
+    if not a:
+        return row
+    h = a.get('holders') or {}
+    dist = h.get('distribution_percentage') or {}
+    row = dict(at=NOW, holders=h.get('count'), top10=_f(dist.get('top_10')), honeypot=a.get('is_honeypot'),
+               mint=bool(a.get('mint_authority')) and a.get('mint_authority') not in ('no', 'renounced'),
+               freeze=bool(a.get('freeze_authority')) and a.get('freeze_authority') not in ('no', 'renounced'),
+               gt_score=_f(a.get('gt_score')))
+    sc[key] = row
+    return row
+
+
+def tradable(info, sf, strict=True):
+    """(ok, reasons). Fails closed only on hard evidence; unknown holder data is not a pass for buy signals."""
+    why = []
+    liq, mc = info.get('liq'), info.get('mc')
+    if liq is None:
+        if strict:
+            why.append('liquidity unknown')
+    elif liq < 10_000:
+        why.append('liquidity under $10K')
+    elif mc and mc > 100 * liq:
+        why.append('market cap far above liquidity')
+    if sf:
+        if sf.get('honeypot') is True:
+            why.append("honeypot: can't sell")
+        if sf.get('holders') is not None and sf['holders'] < 100:
+            why.append(f"only {sf['holders']} holders")
+        if sf.get('top10') is not None and sf['top10'] > 75:
+            why.append(f"top 10 wallets hold {sf['top10']:.0f}%")
+        if sf.get('freeze'):
+            why.append('creator can freeze wallets')
+        if sf.get('mint'):
+            why.append('creator can mint more')
+    return (not why), why
 
 
 def _f(x):
@@ -558,6 +612,9 @@ def evm_backfill(chain, ca, created, wallets, st):
     """Every transfer of this token INTO a watched wallet since the token launched (getLogs with the token as
     address filter, so any block range is allowed). Resumes across passes; keeps each wallet's first receipt."""
     bf = st.setdefault('bf', {}).setdefault(f'{chain}|{ca}', {})
+    if bf.get('v') != 3:
+        bf.clear()
+        bf['v'] = 3                                  # earlier entries used a token age that could be wrong
     if bf.get('done') or not wallets:
         return bf
     cfg = EVM[chain]
@@ -567,8 +624,8 @@ def evm_backfill(chain, ca, created, wallets, st):
     except Exception:
         return bf
     if 'next' not in bf:
-        age = max(3600, NOW - (created or NOW))
-        bf.update(next=max(0, head - int(age / cfg['block_s'] * 1.15) - 300), first={},
+        age = max(NOW - (created or NOW), DISC_MAX_AGE)   # never trust a pool date alone: cover the full 7 days
+        bf.update(next=max(0, head - int(age / cfg['block_s'] * 1.05) - 300), first={},
                   rng=100000 if chain == 'Robinhood' else 20000)
     wl = sorted(wallets)
     wset = set(wl)
@@ -603,19 +660,59 @@ def evm_backfill(chain, ca, created, wallets, st):
                 continue                    # a team wallet passing tokens to its sibling is not a buy
             bn = int(l['blockNumber'], 16)
             prev = bf['first'].get(to)
+            try:
+                raw = int(l.get('data') or '0x0', 16)
+            except Exception:
+                raw = 0
             if not prev or bn < prev[0]:
-                bf['first'][to] = [bn, l['transactionHash']]
+                bf['first'][to] = [bn, l['transactionHash'], str(raw)]
+            elif bn == prev[0] and l['transactionHash'] == prev[1]:
+                prev[2] = str(int(prev[2]) + raw)      # split delivery in the same buy
         bf['next'] = e + 1
         bf['rng'] = min(bf['rng'] * 2, bf.get('cap') or (100_000 if chain == 'Robinhood' else 50_000))
     if bf['next'] > head:
         bf['done'] = True
+    tss = bf.setdefault('ts', {})
     for w, v in sorted(bf['first'].items(), key=lambda kv: kv[1][0])[:6]:
-        if len(v) == 2 and left() > 25:
+        if w not in tss and left() > 25:
             try:
-                v.append(int(rpc.call('eth_getBlockByNumber', [hex(v[0]), False])['timestamp'], 16))
+                tss[w] = int(rpc.call('eth_getBlockByNumber', [hex(v[0]), False])['timestamp'], 16)
             except Exception:
                 pass
     return bf
+
+
+NATIVE_REF = {'BSC': ('BSC', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c'),          # WBNB
+              'Base': ('Ethereum', '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'),    # ETH (via mainnet WETH)
+              'Ethereum': ('Ethereum', '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'),
+              'Robinhood': ('Ethereum', '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')}
+
+
+def usd_paid(chain, tx, wallet, ca, tokens):
+    """Dollars a wallet paid in one buy: native coin sent with the transaction, or other tokens it sent out."""
+    rpc = RPC(chain, EVM[chain]['rpcs'], gap=0.12)
+    t = rpc.call('eth_getTransactionByHash', [tx]) or {}
+    native = int(t.get('value') or '0x0', 16) / 1e18
+    if native > 0:
+        rc, ra = NATIVE_REF[chain]
+        token_info(rc, [ra], tokens)
+        px = (tokens.get(f'{rc}|{ra}') or {}).get('price')
+        return native * px if px else None
+    rcpt = rpc.call('eth_getTransactionReceipt', [tx]) or {}
+    outs = {}
+    for l in rcpt.get('logs') or []:
+        tp = l.get('topics') or []
+        if len(tp) == 3 and tp[0] == TRANSFER and tp[1] == topic(wallet) and l['address'].lower() != ca:
+            outs[l['address'].lower()] = outs.get(l['address'].lower(), 0) + int(l.get('data') or '0x0', 16)
+    if not outs:
+        return None
+    token_info(chain, list(outs)[:3], tokens)
+    usd = 0.0
+    for a, raw in outs.items():
+        i = tokens.get(f'{chain}|{a}') or {}
+        if i.get('price') and i.get('dec') is not None:
+            usd += raw / 10 ** int(i['dec']) * i['price']
+    return usd or None
 
 
 def price_at(candles, ts):
@@ -641,11 +738,12 @@ def check_entry(r, first, st, tokens):
     if not pool or not first:
         return
     fts, fw, seen_ts = first[0]['ts'], first[0]['wallet'], first[0].get('seen') or first[0]['ts'] + 420
-    if r.get('entry_ts') == fts and r.get('entry_mc'):
-        return
+    if r.get('entry_ts') == fts and (r.get('entry_mc') or NOW - (r.get('entry_try') or 0) < 1800):
+        return                                       # done, or tried recently: do not burn API calls every pass
+    r['entry_try'] = NOW
     m1 = GT.get(f'/networks/{net}/pools/{pool}/ohlcv/minute?aggregate=1&before_timestamp={int(seen_ts) + 600}'
-                f'&limit=60&currency=usd')
-    h1 = GT.get(f'/networks/{net}/pools/{pool}/ohlcv/hour?aggregate=1&limit=200&currency=usd')
+                f'&limit=60&currency=usd&token={r["ca"]}')
+    h1 = GT.get(f'/networks/{net}/pools/{pool}/ohlcv/hour?aggregate=1&limit=200&currency=usd&token={r["ca"]}')
     mins = ((m1 or {}).get('data', {}).get('attributes', {}) or {}).get('ohlcv_list') or []
     hours = ((h1 or {}).get('data', {}).get('attributes', {}) or {}).get('ohlcv_list') or []
     if not hours:
@@ -655,11 +753,36 @@ def check_entry(r, first, st, tokens):
     if not supply:
         return
     p_first, p_seen = price_at(mins, fts), price_at(mins, seen_ts)
+    f0 = first[0]
+    if not p_first and r['chain'] in EVM and f0.get('tx') and f0.get('raw') and left() > 30:
+        info = tokens.get(f"{r['chain']}|{r['ca']}") or {}
+        try:                                         # no candles that early (launchpad curve): price the buy itself
+            paid = usd_paid(r['chain'], f0['tx'], f0['wallet'], r['ca'], tokens)
+            amt = int(f0['raw']) / 10 ** int(info['dec']) if info.get('dec') is not None else 0
+            if paid and amt:
+                p_first = paid / amt
+                if info.get('price') and info.get('mc'):
+                    supply = info['mc'] / info['price']
+                r['entry_from'] = 'buy'
+        except Exception as e:
+            ERRORS.append(f'entry price {r["chain"]}: {type(e).__name__}')
+    if not p_seen:                                   # no minute candle then: first price the pool ever showed
+        later = sorted(c for c in hours if c[0] >= fts - 3600)
+        if later:
+            p_seen, seen_ts = later[0][4], max(int(seen_ts), later[0][0])
+            r['seen_from'] = 'first candle'
     peak_p = max([c[2] for c in hours if c[0] >= fts - 3600] or [0])
-    r.update(entry_ts=fts, entry_wallet=fw,
-             entry_mc=round(p_first * supply) if p_first else None,
-             seen_ts=int(seen_ts), seen_mc=round(p_seen * supply) if p_seen else None,
-             peak_after=max(round(peak_p * supply), r.get('peak_after') or 0, r.get('mc') or 0))
+    top = max(r.get('ath') or 0, r.get('mc') or 0)
+
+    def sane(v):                                     # reject numbers a bad candle or pool could produce
+        return round(v) if v and top and top / 1e4 < v < top * 20 else None
+    entry_mc = sane(p_first * supply if p_first else None)
+    seen_mc = sane(p_seen * supply if p_seen else None)
+    if entry_mc and seen_mc and seen_mc < entry_mc:
+        seen_mc = entry_mc                           # a follower never gets in cheaper than the team did
+    r.update(entry_ts=fts, entry_wallet=fw, entry_mc=entry_mc,
+             seen_ts=int(seen_ts), seen_mc=seen_mc,
+             peak_after=max(sane(peak_p * supply) or 0, r.get('peak_after') or 0, r.get('mc') or 0))
 
 
 def verdict(r):
@@ -957,6 +1080,8 @@ def main():
         info = tokens.get(f"{a['chain']}|{a['ca']}") or {}
         if info:
             a.update(token_extra(info))
+            ok, why = tradable(info, (st.get('safe') or {}).get(f"{a['chain']}|{a['ca']}"))
+            a.update(tradable=ok, risk=why)
         if info.get('mc'):
             a['mc_now'] = info['mc']
             a.setdefault('mc_at_alert', a.get('mc') or info['mc'])
@@ -999,7 +1124,12 @@ def main():
         info = tokens.get(f"{h['chain']}|{h['ca']}") or {}
         mc_now = info.get('mc')
         chg = (mc_now / h['mc_first'] - 1) if (mc_now and h['mc_first']) else None
-        hrows.append(dict(chain=h['chain'], ca=h['ca'], sym=info.get('sym') or h['sym'], first_buy=h['first_buy'],
+        sf = (st.get('safe') or {}).get(f"{h['chain']}|{h['ca']}")
+        if not sf and any(g in good_ids for g in h['groups_6h']) and h['buys_6h']:
+            sf = safety(h['chain'], h['ca'], st)
+        ok, why = tradable(info, sf)
+        hrows.append(dict(tradable=ok, risk=why, holders=(sf or {}).get('holders'), top10=(sf or {}).get('top10'),
+                          chain=h['chain'], ca=h['ca'], sym=info.get('sym') or h['sym'], first_buy=h['first_buy'],
                           last=h['last'], last_buy=h.get('last_buy'), mc_first=h['mc_first'], mc_now=mc_now,
                           change=round(chg, 4) if chg is not None else None, liq=info.get('liq'),
                           buy_usd=round(h['buy_usd'], 2), sell_usd=round(h['sell_usd'], 2), buys=h['buys'],
@@ -1042,6 +1172,13 @@ def main():
         state, age_h = token_state(info)
         if age_h is None or age_h > 24 or state == 'fading':
             continue
+        sym0 = (info.get('sym') or c['sym'] or '').upper()
+        if sym0 in BASE_SYMBOLS or 'USD' in sym0:
+            continue                                  # stablecoins and base coins are not launches
+        sf = safety(c['chain'], c['ca'], st)
+        ok, why = tradable(info, sf)
+        if not ok or not sf:
+            continue                                  # never signal a coin we cannot show is real and sellable
         strong = (c['buy'] >= 300 and len(c['wallets']) >= 2) or c['big'] >= 500
         if not strong or c['sell'] > 0.5 * c['buy']:
             continue
@@ -1070,8 +1207,18 @@ def main():
                 r['peak_change'] = round(r['peak_mc'] / r['mc_at_signal'] - 1, 4)
         r.update({kk: v for kk, v in token_extra(info).items() if kk in ('state', 'age_h', 'ch1', 'ch6', 'liq')} if info else {})
         r['liq'] = info.get('liq')
+        sf = (st.get('safe') or {}).get(k)
+        if info and not sf and NOW - r['first_signal'] < 86400:
+            sf = safety(r['chain'], r['ca'], st)
+        if info:
+            ok, why = tradable(info, sf)
+            r.update(tradable=ok and bool(sf), risk=why if why or sf else ['holder data not checked yet'],
+                     holders=(sf or {}).get('holders'), top10=(sf or {}).get('top10'))
+        sym0 = (r.get('sym') or '').upper()
+        if sym0 in BASE_SYMBOLS or 'USD' in sym0:
+            r.update(tradable=False, risk=['stablecoin or base coin'])
     srows = sorted((r for r in sigs.values() if NOW - r['first_signal'] < 7 * 86400), key=lambda r: -r['first_signal'])
-    notify(srows, {g['id']: g for g in groups})
+    notify([r for r in srows if r.get('tradable')], {g['id']: g for g in groups})
 
     # discovery: every token past $500K in the last 7 days, whether our teams bought it, at what market cap,
     # and whether a follower could still have made money after our scanner saw the buy
@@ -1103,6 +1250,10 @@ def main():
                 r['peak_after'] = max(r.get('peak_after') or 0, info['mc']) if r.get('entry_ts') else r.get('peak_after')
         if r.get('created') and NOW - r['created'] > DISC_MAX_AGE:
             disc.pop(key)                              # older than 7 days: not a fresh launch any more
+            continue
+        liq = r.get('liq')
+        if liq is not None and (liq < 10_000 or (r.get('mc') or 0) > 1000 * liq):
+            disc.pop(key)                              # fake market cap: almost nothing behind it
     order = sorted(disc.values(), key=lambda r: (r.get('checked') or 0, -(r.get('created') or 0)))
     for r in order:
         if left() < 35:
@@ -1121,8 +1272,9 @@ def main():
                 bf = {}
                 ERRORS.append(f'backfill {chain}: {type(e).__name__}')
             for w, v in (bf.get('first') or {}).items():
-                if len(v) >= 3 and (w not in firsts or v[2] < firsts[w]['ts']):
-                    firsts[w] = dict(wallet=w, ts=v[2], usd=None, seen=None, src='chain', tx=v[1])
+                ts = (bf.get('ts') or {}).get(w)
+                if ts and (w not in firsts or ts < firsts[w]['ts']):
+                    firsts[w] = dict(wallet=w, ts=ts, usd=None, seen=None, src='chain', tx=v[1], raw=v[2])
             r['backfill_done'] = bool(bf.get('done'))
         elif chain == 'Solana' and r.get('pool') and r.get('created') and NOW - r['created'] < 6 * 3600 \
                 and NOW - (r.get('trades_at') or 0) > 1200 and left() > 50:
@@ -1159,7 +1311,14 @@ def main():
         r['verdict'] = verdict(r)
     st['bf'] = {k: v for k, v in st.get('bf', {}).items() if k in disc}
     drows = [r for r in disc.values() if r.get('seen', 0) >= cut]
+    for r in drows:
+        sf = (st.get('safe') or {}).get(f"{r['chain']}|{r['ca']}")
+        if r.get('first_buys') and not sf:
+            sf = safety(r['chain'], r['ca'], st, budget=20)   # tokens our teams bought get checked first
+        ok, why = tradable(dict(liq=r.get('liq'), mc=r.get('mc')), sf, strict=False)
+        r.update(tradable=ok, risk=why)
     drows.sort(key=lambda r: (-(r.get('created') or 0)))
+    st['safe'] = {k: v for k, v in (st.get('safe') or {}).items() if NOW - v.get('at', 0) < 3 * 86400}
 
     # trim token cache
     st['tokens'] = {k: v for k, v in tokens.items() if NOW - v.get('at', 0) < 3 * 86400}
