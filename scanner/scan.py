@@ -1453,7 +1453,7 @@ def main():
                 chains={c: dict(({k: v for k, v in st.get('bs', {}).get(c, {}).items() if k != 'last'}
                                  if c in BLOCKSCOUT else st.get('evm', {}).get(c, {})),
                                 wallets=len(watch.get(c, {}))) for c in EVM},
-                solana=dict({k: v for k, v in st.get('sol', {}).items() if k != 'last'},
+                solana=dict({k: v for k, v in st.get('sol', {}).items() if k not in ('last', 'seen')},
                             wallets=len(watch.get('Solana', {}))))
     save(os.path.join(OUT, 'moves.json'), dict(updated=NOW, rows=moves))
     save(os.path.join(OUT, 'groups.json'), dict(updated=NOW, rows=out_groups))
