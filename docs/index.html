@@ -150,11 +150,11 @@ function links(r,extra=''){return`<div class="links">${r.ca?`<a href="${gmgn(r.c
 const median=a=>{const s=a.filter(x=>x!=null).sort((x,y)=>x-y),n=s.length;if(!n)return null;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2};
 
 const grp=id=>GMAP[id];
-const isProven=id=>{const g=GMAP[id];return!!g&&(PROVEN_GRADES.has(g.grade)||cnt(g.legit)>0)};
+const isProven=id=>{const g=GMAP[id];return!!g&&!g.flag&&(PROVEN_GRADES.has(g.grade)||cnt(g.legit)>0)};
 function gname(id,full){const g=grp(id);if(!g)return str(id);return str(full?(g.label||g.nick||g.name):(g.nick||g.name||id))}
 function teamChip(id){const g=grp(id);if(!g)return`<span class="tag">${esc(id||'?')}</span>`;const L=cnt(g.legit);
   const tip=[g.style,g.grade,cnt(g.winners)+' wins / '+cnt(g.failed)+' misses',L?'early on '+L+' lasting token'+(L===1?'':'s'):''].filter(Boolean).join(' · ');
-  return`<span class="tag g-${esc(g.grade)}" title="${esc(tip)}">${L?'★ ':''}${esc(g.nick||g.name||id)}</span>`}
+  return`<span class="tag ${g.flag?'down':'g-'+esc(g.grade)}" title="${esc(g.flag?'⚠ '+g.flag+': '+(g.flag_reason||''):tip)}">${g.flag?'⚠ ':L?'★ ':''}${esc(g.nick||g.name||id)}</span>`}
 function chips(ids,max=4){ids=arr(ids);return ids.slice(0,max).map(teamChip).join('')+(ids.length>max?`<span class="tag">+${ids.length-max}</span>`:'')}
 
 async function j(f){try{const r=await fetch('data/'+f+'?t='+Date.now(),{cache:'no-store'});if(!r.ok)return null;const x=await r.json();return x&&typeof x==='object'?x:null}catch(e){return null}}
@@ -342,9 +342,9 @@ function vTeams(){
   $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. Each team has a nickname so you can follow it, a style (how its wallets are linked) and a grade from its track record before we started watching. Tap a team to see its wallets.</p>
   <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th class="n hide-m">Track record</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
   ${rows.map(g=>{const a=act[g.id],n=cnt(g.n)||arr(g.wallets).length,L=cnt(g.legit);return`<tr><td><details data-id="${esc(g.id)}"><summary><b>${L?'★ ':''}${esc(g.nick||g.name||g.id)}</b> <span class="muted">· ${esc(g.style||g.kind||'')}</span><div class="chain">${esc(g.chain||'?')} · ${plural(n,'wallet')}${g.status?` · <span class="tag st-${esc(g.status)}">${esc(g.status)}</span>`:''}</div></summary>
-    <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div><div class="faint" style="font-size:12px;margin-top:4px">${cnt(g.winners)} wins / ${cnt(g.failed)} misses · Research id ${esc(g.id)} · ${esc(g.research_name||g.name||'')}</div>
+    <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div>${g.flag?`<div class="down" style="margin-top:4px;font-size:13px">⚠ ${esc(g.flag)}: ${esc(g.flag_reason||'')}. This team never triggers buy signals.</div>`:''}<div class="faint" style="font-size:12px;margin-top:4px">${cnt(g.winners)} wins / ${cnt(g.failed)} misses · Research id ${esc(g.id)} · ${esc(g.research_name||g.name||'')}</div>
     <div class="wl">${arr(g.wallets).filter(w=>w&&w.w).map(w=>`<a class="tag mono" href="${esc(`https://gmgn.ai/${net(GM,g.chain)}/address/${encodeURIComponent(str(w.w))}`)}" target="_blank" rel="noopener">${short(w.w)}${w.role?' · '+esc(w.role):''}</a>`).join('')}</div></details></td>
-    <td><span class="tag g-${esc(g.grade)}">${esc(g.grade||'—')}</span></td>
+    <td><span class="tag g-${esc(g.grade)}">${esc(g.grade||'—')}</span>${g.flag?`<div><span class="tag down" title="${esc(g.flag_reason||'')}">⚠ ${esc(g.flag)}</span></div>`:''}</td>
     <td class="n hide-m">${cnt(g.winners)} wins / ${cnt(g.failed)} misses${L?`<div class="up" style="font-size:12px">★ early on ${plural(L,'lasting token')}</div>`:''}${num(g.profit)>0?`<div class="chain">${usd(g.profit)} profit found</div>`:''}</td>
     <td>${a&&a.lb?`<span class="buy">bought</span> <b>${symOf(a.lb)}</b><div class="chain">${ago(a.lb.ts)}</div>`:'<span class="faint">no buys seen yet</span>'}</td>
     <td class="n hide-m">${a?a.b24:0}${a&&a.u24?`<div class="chain">${usd(a.u24)}</div>`:''}</td>
@@ -395,6 +395,7 @@ function vHow(){
   $('#view').innerHTML=`<div class="note">
   <p><b>Buy signals (start here).</b> A signal fires only when <b>proven teams</b> (grade Elite, Strong or Tested, or ★) put <b>real money</b> into a <b>fresh token</b>: every buy counted is at least $50, and together they add up to $300+ from 2 or more wallets or teams, or there is one single buy of $500+. The token must be under 24 hours old, not already fading, and the teams must not be selling (their sells less than half their buys). Signals are rare on purpose. Each card shows how old the token was when flagged, how long ago it was flagged, market cap then and now, and the best it has done since.</p>
   <p><b>Scam filter.</b> Every token is checked before it can become a buy signal: at least $10K of real liquidity, market cap not more than 100x the liquidity, 100+ holders, the top 10 wallets holding no more than 75%, not a honeypot (you can sell), and on Solana the creator cannot mint more or freeze wallets. Tokens that fail are hidden on every tab (the Live feed too) and never sent to your phone. Each tab has a button to show them, marked ⚠ with the reason.</p>
+  <p><b>Dump rings (the Cupsey pattern).</b> Some wallets buy a token before a KOL calls it, or are sent tokens by the deployer, then sell into the followers the moment the KOL buys. Teams caught doing this are marked ⚠ on the Teams tab and never trigger buy signals. This is checked live: a team that sells tokens it never bought gets flagged automatically. Known KOL dump-ring wallets (Cupsey's side wallets and others we found) are watched too. Any token they touch, or that insiders dump without ever buying, is marked ⚠ and blocked from signals.</p>
   <p><b>No spam.</b> Small test buys and buys by unproven teams are left out by default everywhere: the Live feed shows proven-team buys of $${FEED_MIN}+ only, and Hot now only shows a token if a proven team put in $${HOT_MIN}+ in the last 6 hours or 2+ proven teams are in. Each has a button to show everything.</p>
   <p><b>Phone alerts.</b> Install the free <b>ntfy</b> app and subscribe to the topic <span class="mono">${esc(NTFY_TOPIC)}</span> (or open <a href="${esc(NTFY_URL)}" target="_blank" rel="noopener">${esc(NTFY_URL)}</a>). You get a notification for each new buy signal.</p>
   <p><b>It is not instant.</b> The scanner runs about every 6 to 7 minutes, so a signal or phone alert usually lands a few minutes after the buy happened, sometimes up to ~10 minutes. The Live feed shows "seen Xm after the trade" so you can see the delay. Fast tokens can move a lot in that time.</p>
