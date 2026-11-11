@@ -122,7 +122,7 @@ const PROVEN_GRADES=new Set(['Elite','Strong','Tested']);
 const AGE_MAX=72,FEED_MIN=100,HOT_MIN=200;
 
 let D={moves:[],groups:[],alerts:[],disc:[],hot:[],sig:null,meta:{}},GMAP={};
-let view='signals',chain='All',q='',bestMode='best',age='fresh',fading=false,sigFading=false,feedAll=false,hotSmall=false,newAll=false;
+let view='signals',chain='All',q='',bestMode='best',age='fresh',fading=false,sigFading=false,feedAll=false,hotSmall=false,newAll=false,showRisky=false;
 let lastLoad=0,loading=false;
 
 const $=s=>document.querySelector(s);
@@ -191,6 +191,10 @@ function ageTxt(h){const a=num(h.age_h);return a==null?'age ?':ageFmt(a)+' old'}
 function ageFmt(a){return a<1?Math.max(1,Math.round(a*60))+'m':a<48?Math.round(a)+'h':Math.round(a/24)+'d'}
 function freshOK(h){if(!fading&&h.state==='fading')return false;if(age==='fresh'){const a=num(h.age_h);return a!=null&&a<=AGE_MAX}return true}
 function stateTag(h){const a=num(h.age_h);const m={fresh:['Fresh','up'],running:['Running','up'],fading:['Fading','down'],older:a!=null&&a<=72?['Young','muted']:['Older','faint']}[h.state];return m?`<span class="tag ${m[1]}">${m[0]}</span>`:''}
+function safeOK(x){return showRisky||!x||x.tradable!==false}
+function riskyKeys(){const k=new Set();[D.hot,D.alerts,D.disc,arr(D.sig)].forEach(l=>arr(l).forEach(x=>{if(x&&x.tradable===false)k.add(str(x.chain)+'|'+str(x.ca))}));return k}
+function riskTag(x){return x&&x.tradable===false?`<span class="tag down" title="${esc(arr(x.risk).join(', '))}">⚠ ${esc(arr(x.risk)[0]||'not tradable')}</span>`:''}
+function riskBar(n){return`<div class="bar seg"><button data-r="1" class="${showRisky?'on':''}">${showRisky?'Showing':'Hiding'} scam / untradable tokens${n?' ('+n+')':''}</button></div>`}
 function freshBar(){return`<div class="bar seg"><button data-a="fresh" class="${age==='fresh'?'on':''}">Fresh only (under 3 days)</button><button data-a="all" class="${age==='all'?'on':''}">Any age</button><button data-x="1" class="${fading?'on':''}">${fading?'Showing':'Hiding'} fading tokens</button></div>`}
 const GW={Elite:3,Strong:2,Tested:2,Decent:1,Unproven:.5};const LW=g=>Math.min(cnt(g&&g.legit),3);
 const g6=h=>Array.isArray(h.groups_6h)?h.groups_6h:arr(h.groups);
@@ -240,20 +244,20 @@ function sigCard(s){
   const big=num(s.biggest);
   const lag=fs&&fb&&fs-fb>=60?dur(fs-fb):'';
   return`<div class="tok ${isNew?'fire':''}">
-    <div class="top"><div><div class="sym">${symOf(s)}</div><div class="chain">${esc(s.chain||'?')} · <span class="mono">${short(s.ca)}</span></div></div><div style="text-align:right">${isNew?'<span class="heat h3">New</span>':''}<div style="margin-top:4px">${stateTag(s)}</div></div></div>
+    <div class="top"><div><div class="sym">${symOf(s)}</div><div class="chain">${esc(s.chain||'?')} · <span class="mono">${short(s.ca)}</span></div></div><div style="text-align:right">${isNew?'<span class="heat h3">New</span>':''}<div style="margin-top:4px">${stateTag(s)} ${riskTag(s)}</div></div></div>
     <div class="what">${who}${big?` <span class="muted">(biggest single buy ${usd(big)})</span>`:''}</div>
     <div class="when">${a!=null?`Token was <b>${ageFmt(a)}</b> old when flagged`:'Token age at flag unknown'} · Flagged <b>${ago(fs)}</b>${lag?` · ${lag} after the first team buy`:''}</div>
-    <div class="stats"><div><span>MC at signal</span><b>${mc(s.mc_at_signal)}</b></div><div><span>MC now</span><b>${mc(s.mc_now)}</b></div><div><span>Since signal</span><b>${pct(sigChange(s))}</b></div><div><span>Best since</span><b>${pct(sigPeak(s))}</b></div><div><span>Price 1h</span><b>${pct(num(s.ch1)!=null?num(s.ch1)/100:null)}</b></div><div><span>Liquidity</span><b>${usd(s.liq)}</b></div></div>
+    <div class="stats"><div><span>MC at signal</span><b>${mc(s.mc_at_signal)}</b></div><div><span>MC now</span><b>${mc(s.mc_now)}</b></div><div><span>Since signal</span><b>${pct(sigChange(s))}</b></div><div><span>Best since</span><b>${pct(sigPeak(s))}</b></div><div><span>Price 1h</span><b>${pct(num(s.ch1)!=null?num(s.ch1)/100:null)}</b></div><div><span>Liquidity</span><b>${usd(s.liq)}</b></div>${num(s.holders)!=null?`<div><span>Holders</span><b>${cnt(s.holders).toLocaleString()}</b></div>`:''}${num(s.top10)!=null?`<div><span>Top 10 hold</span><b>${Math.round(num(s.top10))}%</b></div>`:''}</div>
     <div class="teams">${chips(s.teams)}</div>
     ${links(s,`<span class="faint">token now ${ageTxt(s)}</span>`)}
   </div>`;
 }
 function vSignals(){
   const t7=now()-7*86400;
-  const wk=sigs().filter(s=>inChain(s)&&(num(s.first_signal)||0)>=t7);
+  const wk=sigs().filter(s=>inChain(s)&&s.tradable!==false&&(num(s.first_signal)||0)>=t7);
   const ch=wk.map(sigChange).filter(x=>x!=null),pk=wk.map(sigPeak).filter(x=>x!=null);
   const upN=ch.filter(x=>x>0).length,dbl=pk.filter(x=>x>=1).length,med=median(ch);
-  const all=sigs().filter(s=>inChain(s)&&match(s,arr(s.teams).map(x=>gname(x)).join(' ')));
+  const all0=sigs().filter(s=>inChain(s)&&match(s,arr(s.teams).map(x=>gname(x)).join(' '))),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const nFade=all.filter(s=>s.state==='fading').length;
   const rows=all.filter(s=>sigFading||s.state!=='fading').sort((a,b)=>(num(b.first_signal)||0)-(num(a.first_signal)||0));
   const where=chain!=='All'?' on '+esc(chain):'';
@@ -270,7 +274,7 @@ function vSignals(){
     <div class="kpi"><span>Doubled at some point</span><b>${pk.length?Math.round(100*dbl/pk.length)+'%':'—'}</b><small>${pk.length?dbl+' of '+pk.length:''}</small></div>
   </div>
   <p class="hint">Scoreboard counts every signal from the last 7 days${where}, faded ones included, so it is honest. "Doubled" means market cap hit 2x the signal level at least once.</p>
-  <div class="bar seg"><button data-sf="1" class="${sigFading?'on':''}">${sigFading?'Showing':'Hiding'} fading signals${nFade?' ('+nFade+')':''}</button></div>
+  ${riskBar(nRisk)}<div class="bar seg"><button data-sf="1" class="${sigFading?'on':''}">${sigFading?'Showing':'Hiding'} fading signals${nFade?' ('+nFade+')':''}</button></div>
   ${body}`;
 }
 
@@ -280,7 +284,7 @@ function tokCard(h){
   const lvl=ts>=4||(ts>=2&&nw>=3)?3:ts>=2||nw>=2||u6>=1000?2:1;const ids=g6(h),nt=ids.length,np=provenIn(ids);
   const lab=['','Warm','Hot','Very hot'][lvl];
   return`<div class="tok ${lvl===3?'fire':''}">
-    <div class="top"><div><div class="sym">${symOf(h)}</div><div class="chain">${esc(h.chain||'?')} · ${ageTxt(h)} · <span class="mono">${short(h.ca)}</span></div></div><div style="text-align:right"><span class="heat h${lvl}">${lab}</span><div style="margin-top:4px">${stateTag(h)}</div></div></div>
+    <div class="top"><div><div class="sym">${symOf(h)}</div><div class="chain">${esc(h.chain||'?')} · ${ageTxt(h)} · <span class="mono">${short(h.ca)}</span></div></div><div style="text-align:right"><span class="heat h${lvl}">${lab}</span><div style="margin-top:4px">${stateTag(h)} ${riskTag(h)}</div></div></div>
     <div class="what"><b>${plural(nt,'team')}</b>${np?` <span class="muted">(${np} proven)</span>`:''} ${nw?' · '+plural(nw,'wallet'):''} bought <b>${usd(u6)}</b> in the last 6h</div>
     <div class="stats"><div><span>Market cap now</span><b>${usd(h.mc_now)}</b></div><div><span>Since 1st team buy</span><b>${pct(h.change)}</b></div><div><span>Last team buy</span><b>${ago(h.last_buy||h.last)}</b></div><div><span>Price 1h</span><b>${pct(num(h.ch1)!=null?num(h.ch1)/100:null)}</b></div><div><span>Price 6h</span><b>${pct(num(h.ch6)!=null?num(h.ch6)/100:null)}</b></div><div><span>Volume 24h</span><b>${usd(h.vol24)}</b></div></div>
     <div class="teams">${chips(ids)}</div>
@@ -288,16 +292,16 @@ function tokCard(h){
   </div>`;
 }
 function vHot(){
-  const base=D.hot.filter(h=>inChain(h)&&cnt(h.buys_6h)>0&&freshOK(h)&&match(h));
+  const base0=D.hot.filter(h=>inChain(h)&&cnt(h.buys_6h)>0&&freshOK(h)&&match(h)),base=base0.filter(safeOK),nRisk=base0.length-base.length;
   const rows=base.filter(h=>hotSmall||hotLegit(h)).sort((a,b)=>heat(b)-heat(a)),hidden=base.length-rows.length;
-  $('#view').innerHTML=`<p class="lead">Tokens our teams are buying right now (last 6 hours), hottest first. Only buys count: by the time a team sells it is usually too late. By default you only see fresh tokens (launched in the last 3 days) that are not already dumping, and only where a proven team put in $${HOT_MIN}+ or 2+ proven teams are in. "Very hot" means several proven teams are in at once.</p>${freshBar()}
+  $('#view').innerHTML=`<p class="lead">Tokens our teams are buying right now (last 6 hours), hottest first. Only buys count: by the time a team sells it is usually too late. By default you only see fresh tokens (launched in the last 3 days) that are not already dumping, and only where a proven team put in $${HOT_MIN}+ or 2+ proven teams are in. "Very hot" means several proven teams are in at once.</p>${freshBar()}${riskBar(nRisk)}
   <div class="bar seg"><button data-s="1" class="${hotSmall?'on':''}">${hotSmall?'Showing small buys too':'Show small buys'}${!hotSmall&&hidden?' ('+hidden+' hidden)':''}</button></div>`+
     (rows.length?`<div class="grid">${rows.slice(0,60).map(tokCard).join('')}</div>`:`<div class="card empty">No proven-team buys of real size on ${age==='fresh'?'fresh ':''}tokens in the last 6 hours${chain!=='All'?' on '+esc(chain):''}${q?' matching your search':''}.${hidden?` ${plural(hidden,'token')} with only small or unproven buys ${hidden===1?'is':'are'} hidden; tap "Show small buys".`:''}${age==='fresh'?' Or try "Any age".':''}</div>`);
 }
 
 /* ---------- Best last 3 days ---------- */
 function vBest(){
-  const all=D.hot.filter(h=>inChain(h)&&num(h.change)!=null&&freshOK(h)&&match(h));
+  const all0=D.hot.filter(h=>inChain(h)&&num(h.change)!=null&&freshOK(h)&&match(h)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const n=all.length,upN=all.filter(h=>num(h.change)>0).length,med=median(all.map(h=>num(h.change))),dbl=all.filter(h=>num(h.change)>=1).length;
   const rows=[...all].sort((a,b)=>bestMode==='best'?num(b.change)-num(a.change):num(a.change)-num(b.change));
   $('#view').innerHTML=`<p class="lead">Every token a team bought in the last 3 days, ranked by how far its market cap has moved since the first team buy. This is the honest scoreboard: the losers are shown too.</p>${freshBar()}
@@ -307,9 +311,9 @@ function vBest(){
     <div class="kpi"><span>Median move</span><b>${pct(med)}</b></div>
     <div class="kpi"><span>Doubled or better</span><b>${dbl}</b></div>
   </div>
-  <div class="bar seg"><button data-b="best" class="${bestMode==='best'?'on':''}">Best first</button><button data-b="worst" class="${bestMode==='worst'?'on':''}">Worst first</button></div>
+  ${riskBar(nRisk)}<div class="bar seg"><button data-b="best" class="${bestMode==='best'?'on':''}">Best first</button><button data-b="worst" class="${bestMode==='worst'?'on':''}">Worst first</button></div>
   <div class="card scroll"><table><thead><tr><th>#</th><th>Token</th><th class="n">Since 1st team buy</th><th class="n hide-m">MC at 1st buy</th><th class="n">MC now</th><th class="hide-m">Who bought</th><th class="n hide-m">Team bought</th><th class="hide-m">First buy</th></tr></thead><tbody>
-  ${rows.slice(0,300).map((h,i)=>`<tr><td class="muted">${i+1}</td><td>${tokLink(h)} ${stateTag(h)}<div class="chain">${esc(h.chain||'?')} · ${ageTxt(h)}</div></td>
+  ${rows.slice(0,300).map((h,i)=>`<tr><td class="muted">${i+1}</td><td>${tokLink(h)} ${stateTag(h)} ${riskTag(h)}<div class="chain">${esc(h.chain||'?')} · ${ageTxt(h)}</div></td>
     <td class="n"><b>${pct(h.change)}</b></td><td class="n hide-m">${usd(h.mc_first)}</td><td class="n">${usd(h.mc_now)}</td>
     <td class="hide-m"><div class="teams">${chips(h.groups,3)}</div></td>
     <td class="n hide-m"><span class="buy">${usd(h.buy_usd)}</span></td><td class="hide-m muted">${ago(h.first_buy)}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">Nothing here yet${age==='fresh'?'. Try "Any age"':''}.</td></tr>`}
@@ -318,10 +322,10 @@ function vBest(){
 
 /* ---------- Live feed ---------- */
 function vFeed(){
-  const base=D.moves.filter(m=>inChain(m)&&m.side==='buy'&&match(m,m.wallet));
+  const rk=riskyKeys(),base0=D.moves.filter(m=>inChain(m)&&m.side==='buy'&&match(m,m.wallet)),base=showRisky?base0:base0.filter(m=>!rk.has(str(m.chain)+'|'+str(m.ca))),nRisk=base0.length-base.length;
   const rows=feedAll?base:base.filter(feedLegit);
   $('#view').innerHTML=`<p class="lead">Team buys, newest first, in plain words. Sells are left out on purpose. By default only buys of $${FEED_MIN}+ by proven teams (Elite, Strong, Tested or ★) are shown, so small test buys do not drown out the real ones.</p>
-  <div class="bar seg"><button data-f="proven" class="${feedAll?'':'on'}">Proven teams, $${FEED_MIN}+ only</button><button data-f="all" class="${feedAll?'on':''}">All buys (${base.length})</button></div>
+  ${riskBar(nRisk)}<div class="bar seg"><button data-f="proven" class="${feedAll?'':'on'}">Proven teams, $${FEED_MIN}+ only</button><button data-f="all" class="${feedAll?'on':''}">All buys (${base.length})</button></div>
   <div class="card scroll"><ul class="feed">${rows.slice(0,300).map(m=>{const ids=arr(m.groups),g=ids.find(isProven)||ids[0],gg=grp(g);
     const ts=num(m.ts),seen=num(m.new),lag=ts&&seen&&seen>=ts?seen-ts:null;
     const desc=gg?[gg.style,gg.grade].filter(Boolean).map(esc).join(', '):'';
@@ -350,10 +354,10 @@ function vTeams(){
 
 /* ---------- Alerts ---------- */
 function vAlerts(){
-  const rows=D.alerts.filter(a=>inChain(a)&&freshOK(a)&&match(a,arr(a.group_names).join(' ')+' '+str(a.group_name)+' '+gname(a.group))).sort((x,y)=>(num(y.first_alert)||0)-(num(x.first_alert)||0));
-  $('#view').innerHTML=`<p class="lead">The older, looser alert: fires when two or more wallets from one team, or two or more different teams, buy the same token within 6 hours, of any size and any grade. <b>Buy signals</b> is the stricter version (proven teams, real money, fresh tokens). Tokens that are old or already dumping are hidden unless you switch them on.</p>${freshBar()}
+  const nRisk=D.alerts.filter(a=>inChain(a)&&freshOK(a)&&!safeOK(a)).length,rows=D.alerts.filter(a=>inChain(a)&&freshOK(a)&&safeOK(a)&&match(a,arr(a.group_names).join(' ')+' '+str(a.group_name)+' '+gname(a.group))).sort((x,y)=>(num(y.first_alert)||0)-(num(x.first_alert)||0));
+  $('#view').innerHTML=`<p class="lead">The older, looser alert: fires when two or more wallets from one team, or two or more different teams, buy the same token within 6 hours, of any size and any grade. <b>Buy signals</b> is the stricter version (proven teams, real money, fresh tokens). Tokens that are old or already dumping are hidden unless you switch them on.</p>${freshBar()}${riskBar(nRisk)}
   <div class="card scroll"><table><thead><tr><th>When</th><th>Token</th><th>Why it fired</th><th class="n hide-m">MC at alert</th><th class="n">MC now</th><th class="n">Change</th></tr></thead><tbody>
-  ${rows.map(a=>{const mc0=num(a.mc_at_alert)||num(a.mc),mc1=num(a.mc_now);return`<tr><td class="muted">${ago(a.first_alert)}</td><td>${tokLink(a)} ${stateTag(a)}<div class="chain">${esc(a.chain||'?')} · ${ageTxt(a)}</div></td>
+  ${rows.map(a=>{const mc0=num(a.mc_at_alert)||num(a.mc),mc1=num(a.mc_now);return`<tr><td class="muted">${ago(a.first_alert)}</td><td>${tokLink(a)} ${stateTag(a)} ${riskTag(a)}<div class="chain">${esc(a.chain||'?')} · ${ageTxt(a)}</div></td>
     <td>${a.kind==='group'?`${cnt(a.wallets)} wallets of ${teamChip(a.group)} bought together`:`${cnt(a.n_groups)||arr(a.groups).length} different teams bought: ${chips(a.groups)}`}<div class="chain">${usd(a.usd)} total</div></td>
     <td class="n hide-m">${usd(mc0)}</td><td class="n">${usd(mc1)}</td><td class="n">${pct(mc0&&mc1!=null?mc1/mc0-1:null)}</td></tr>`}).join('')||`<tr><td colspan="6" class="empty">No alerts ${age==='fresh'?'on fresh tokens ':''}right now.${age==='fresh'?' Try "Any age".':''}</td></tr>`}
   </tbody></table></div>`;
@@ -361,7 +365,7 @@ function vAlerts(){
 
 /* ---------- New tokens ---------- */
 function vNew(){
-  const all=D.disc.filter(r=>inChain(r)&&match(r));
+  const all0=D.disc.filter(r=>inChain(r)&&match(r)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const rows=all.filter(r=>newAll||arr(r.first_buys).length).sort((x,y)=>(num(y.created)||0)-(num(x.created)||0));
   const bought=all.filter(r=>arr(r.first_buys).length),yes=bought.filter(r=>r.verdict==='yes').length,some=bought.filter(r=>r.verdict==='some').length,late=bought.filter(r=>r.verdict==='late').length;
   const V={yes:['Could have bought','up'],some:['Some room','muted'],late:['Too late','down'],unknown:['No price yet','faint'],none:['No team buy','faint']};
@@ -373,14 +377,14 @@ function vNew(){
     <div class="kpi"><span>Could have bought (2x+ left)</span><b class="up">${yes}</b></div>
     <div class="kpi"><span>Some room / too late</span><b>${some} / ${late}</b></div>
   </div>
-  <div class="bar seg"><button data-n="bought" class="${newAll?'':'on'}">Only ones our teams bought</button><button data-n="all" class="${newAll?'on':''}">All ${all.length} tokens</button></div>
+  ${riskBar(nRisk)}<div class="bar seg"><button data-n="bought" class="${newAll?'':'on'}">Only ones our teams bought</button><button data-n="all" class="${newAll?'on':''}">All ${all.length} tokens</button></div>
   <div class="card scroll"><table><thead><tr><th>Token</th><th class="n">MC now / best</th><th>First team buy</th><th class="n hide-m">When we'd have seen it</th><th>Verdict</th></tr></thead><tbody>
   ${rows.map(r=>{const c=num(r.created),fb=arr(r.first_buys),f=fb[0],v=V[r.verdict]||(fb.length?V.unknown:V.none);
     const pending=(r.chain!=='Solana'&&r.backfill_done===false)?'<div class="chain">still checking older blocks…</div>':'';
-    return`<tr><td>${tokLink(r)}<div class="chain">${esc(r.chain||'?')} · ${c?ageFmt(Math.max(0,now()-c)/3600)+' old':'age ?'}</div></td>
+    return`<tr><td>${tokLink(r)} ${riskTag(r)}<div class="chain">${esc(r.chain||'?')} · ${c?ageFmt(Math.max(0,now()-c)/3600)+' old':'age ?'}</div></td>
     <td class="n">${usd(r.mc)}<div class="chain">best ${usd(Math.max(num(r.peak_after)||0,num(r.ath)||0)||null)}</div></td>
-    <td>${f?`${mcAt(r.entry_mc,num(f.ts),c)}<div class="teams">${chips(r.groups,3)}</div><div class="chain">${plural(fb.length,'team wallet')}</div>`:'<span class="faint">none of our wallets</span>'}${pending}</td>
-    <td class="n hide-m">${r.seen_mc?`${usd(r.seen_mc)}<div class="chain">${f&&f.seen?ageFmt(Math.max(0,(num(f.seen)||0)-(num(f.ts)||0))/3600)+' after the buy':'~7m after the buy'}</div>`:'<span class="faint">—</span>'}</td>
+    <td>${f?`${mcAt(r.entry_mc,num(f.ts),c)}${r.entry_from==='buy'?'<div class="chain">priced from the team\'s own buy</div>':''}<div class="teams">${chips(r.groups,3)}</div><div class="chain">${plural(fb.length,'team wallet')}</div>`:'<span class="faint">none of our wallets</span>'}${pending}</td>
+    <td class="n hide-m">${r.seen_mc?`${usd(r.seen_mc)}<div class="chain">${r.seen_from==='first candle'?'first price on the main pool':f&&f.seen?ageFmt(Math.max(0,(num(f.seen)||0)-(num(f.ts)||0))/3600)+' after the buy':'~7m after the buy'}</div>`:'<span class="faint">—</span>'}</td>
     <td><span class="tag ${v[1]}">${v[0]}</span>${num(r.room)?`<div class="chain">${num(r.room).toFixed(1)}x from where we'd see it to its best</div>`:''}</td></tr>`}).join('')||`<tr><td colspan="5" class="empty">${newAll?'No tokens past $500K yet.':'None of our teams bought a $500K+ token in the last 7 days yet. Older buys are being checked a few tokens per scan.'}</td></tr>`}
   </tbody></table></div>
   <p class="faint" style="margin-top:8px;font-size:12px">"Could have bought" = from the market cap at the moment our scanner would have seen the first team buy, the token later at least doubled. "Some room" = rose 30-100% more. "Too late" = under 30%. Robinhood, BSC, Base and Ethereum are checked from launch using the chain itself; Solana uses what our scanner saw live plus the token's latest trades, so very early Solana buys before the scanner started can be missed.</p>`;
@@ -390,6 +394,7 @@ function vNew(){
 function vHow(){
   $('#view').innerHTML=`<div class="note">
   <p><b>Buy signals (start here).</b> A signal fires only when <b>proven teams</b> (grade Elite, Strong or Tested, or ★) put <b>real money</b> into a <b>fresh token</b>: every buy counted is at least $50, and together they add up to $300+ from 2 or more wallets or teams, or there is one single buy of $500+. The token must be under 24 hours old, not already fading, and the teams must not be selling (their sells less than half their buys). Signals are rare on purpose. Each card shows how old the token was when flagged, how long ago it was flagged, market cap then and now, and the best it has done since.</p>
+  <p><b>Scam filter.</b> Every token is checked before it can become a buy signal: at least $10K of real liquidity, market cap not more than 100x the liquidity, 100+ holders, the top 10 wallets holding no more than 75%, not a honeypot (you can sell), and on Solana the creator cannot mint more or freeze wallets. Tokens that fail are hidden on every tab (the Live feed too) and never sent to your phone. Each tab has a button to show them, marked ⚠ with the reason.</p>
   <p><b>No spam.</b> Small test buys and buys by unproven teams are left out by default everywhere: the Live feed shows proven-team buys of $${FEED_MIN}+ only, and Hot now only shows a token if a proven team put in $${HOT_MIN}+ in the last 6 hours or 2+ proven teams are in. Each has a button to show everything.</p>
   <p><b>Phone alerts.</b> Install the free <b>ntfy</b> app and subscribe to the topic <span class="mono">${esc(NTFY_TOPIC)}</span> (or open <a href="${esc(NTFY_URL)}" target="_blank" rel="noopener">${esc(NTFY_URL)}</a>). You get a notification for each new buy signal.</p>
   <p><b>It is not instant.</b> The scanner runs about every 6 to 7 minutes, so a signal or phone alert usually lands a few minutes after the buy happened, sometimes up to ~10 minutes. The Live feed shows "seen Xm after the trade" so you can see the delay. Fast tokens can move a lot in that time.</p>
@@ -416,7 +421,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)r
   else if(d.sf){sigFading=!sigFading;render()}
   else if(d.f){feedAll=d.f==='all';render()}
   else if(d.s){hotSmall=!hotSmall;render()}
-  else if(d.n){newAll=d.n==='all';render()}});
+  else if(d.n){newAll=d.n==='all';render()}
+  else if(d.r){showRisky=!showRisky;render()}});
 let qT=0;$('#q').addEventListener('input',e=>{clearTimeout(qT);const v=e.target.value.trim().toLowerCase();qT=setTimeout(()=>{if(v!==q){q=v;render()}},120)});
 window.addEventListener('hashchange',()=>{const v=location.hash.slice(1);if(VIEWS.includes(v)&&v!==view){view=v;render()}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastLoad>110000)load()});
