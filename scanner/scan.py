@@ -965,12 +965,32 @@ def load_flags(groups, watch):
     if not os.path.exists(path):
         return
     byid = {g['id']: g for g in groups}
-    rings = {}
+    rings, kols = {}, {}
     with open(path, encoding='utf-8') as f:
         for line in f:
             p = line.rstrip('\n').split('|')
             if p[0] == 'team' and len(p) >= 4 and p[1] in byid:
                 byid[p[1]].update(flag=p[2], flag_reason=p[3], flag_src='research')
+            elif p[0] == 'kol' and len(p) >= 8:
+                chain, ws, name, tw, grade, why, stats = p[1], p[2], p[3], p[4], p[5], p[6], p[7]
+                gid = 'KOL:' + (re.sub(r'[^A-Za-z0-9]+', '', tw or name)[:20] or 'x') + \
+                      f'-{zlib.crc32((name + chain).encode()) % 1000:03d}'
+                try:
+                    st_ = json.loads(stats) if stats else {}
+                except Exception:
+                    st_ = {}
+                wl = [w if chain == 'Solana' else w.lower() for w in ws.split(';') if w]
+                if not wl or gid in kols:
+                    continue
+                kols[gid] = dict(id=gid, chain=chain, kind='kol', tier='K', name=name, twitter=tw, n=len(wl),
+                                 winners=0, failed=0, profit=0, seed_last_ts=None, wallets=wl, legit=0,
+                                 nick=name, style='KOL', about='', grade='KOL', hit=0, label=f'{name} (KOL)',
+                                 short=f"{name} ({CHAIN_SHORT.get(chain, chain)})", research_name=name,
+                                 kol_grade=grade, kol_why=why, kol_stats=st_)
+                for w in wl:
+                    lst = watch.setdefault(chain, {}).setdefault(w, [])
+                    if gid not in lst:
+                        lst.append(gid)
             elif p[0] == 'ring' and len(p) >= 6:
                 chain, w, role, name, note = p[1], p[2], p[3], p[4], p[5]
                 if chain != 'Solana':
@@ -991,6 +1011,7 @@ def load_flags(groups, watch):
                 if gid not in lst:
                     lst.append(gid)
     groups.extend(rings.values())
+    groups.extend(kols.values())
 
 
 def auto_flags(groups, moves, tokens):
@@ -1049,6 +1070,83 @@ def risk_tokens(moves, gmap, tokens):
             RISK_TOK.setdefault(k, []).append(f'insiders dumping ${v:,.0f} of tokens they never bought')
 
 
+KOL_ORDER = ['Follow', 'Watch', 'Not enough data', "Don't follow", 'Exit liquidity', 'Avoid: dump ring']
+
+
+def kol_followups(kmoves, tokens):
+    """Market cap 1h and 6h after each KOL buy: what someone who copied it and held would have."""
+    need = {}
+    for m in kmoves:
+        if m['side'] != 'buy' or not m.get('mc'):
+            continue
+        age = NOW - m['ts']
+        for h, key in ((1, 'mc_1h'), (6, 'mc_6h')):
+            if key not in m and h * 3600 <= age <= (h + 4) * 3600:
+                need.setdefault(m['chain'], {})[m['ca']] = 1
+    for chain, cas in need.items():
+        if left() < SCAN_RESERVE / 2:
+            break
+        token_info(chain, list(cas)[:120], tokens)
+    for m in kmoves:
+        if m['side'] != 'buy' or not m.get('mc'):
+            continue
+        age = NOW - m['ts']
+        for h, key in ((1, 'mc_1h'), (6, 'mc_6h')):
+            if key not in m and h * 3600 <= age <= (h + 4) * 3600:
+                i = tokens.get(f"{m['chain']}|{m['ca']}") or {}
+                if i.get('at') == NOW and i.get('mc'):
+                    m[key] = i['mc']
+
+
+def kol_rows(groups, kmoves, tokens, safe):
+    """One row per KOL: research grade (30-day copy backtest + ring check), adjusted by what we see live."""
+    rows = []
+    by = {}
+    for m in kmoves:
+        for g in m['groups']:
+            by.setdefault(g, []).append(m)
+    for g in groups:
+        if g.get('kind') != 'kol':
+            continue
+        ms = sorted(by.get(g['id'], []), key=lambda m: -m['ts'])
+        buys = [m for m in ms if m['side'] == 'buy' and (m.get('usd') or 0) >= 100]
+        first = {}
+        for m in sorted(buys, key=lambda m: m['ts']):
+            first.setdefault(m['ca'], m)
+        r1 = [max(-1, min(m['mc_1h'] / m['mc'] - 1, 10)) for m in first.values() if m.get('mc_1h') and m.get('mc')]
+        r6 = [max(-1, min(m['mc_6h'] / m['mc'] - 1, 10)) for m in first.values() if m.get('mc_6h') and m.get('mc')]
+        med = lambda v: round(sorted(v)[len(v) // 2], 3) if v else None
+        live = dict(n1=len(r1), med1=med(r1), win1=round(sum(x > 0 for x in r1) / len(r1), 2) if r1 else None,
+                    mean1=round(sum(r1) / len(r1), 3) if r1 else None, n6=len(r6), med6=med(r6))
+        grade, why = g.get('kol_grade') or 'Not enough data', [x for x in (g.get('kol_why') or '').split(';') if x]
+        if len(r1) >= 8:                              # live results can lower a grade, or lift one we had no data for
+            if grade == 'Follow' and (live['med1'] < -0.15 or live['mean1'] < -0.05):
+                grade = 'Watch'
+                why.insert(0, f"live: copies held 1h lost (median {live['med1']:+.0%} over {len(r1)} buys)")
+            elif grade == 'Not enough data':
+                grade = 'Watch' if live['med1'] >= 0 else "Don't follow"
+                why.insert(0, f"live only: median {live['med1']:+.0%} 1h after {len(r1)} buys")
+        risky = [m for m in buys[:20] if RISK_TOK.get(f"{m['chain']}|{m['ca']}")]
+        if len(risky) >= 3 and grade not in ('Avoid: dump ring',):
+            why.insert(0, f'live: {len(risky)} of its recent buys had ring or insider dumping')
+            if grade == 'Follow':
+                grade = 'Watch'
+        recent = []
+        for m in buys[:8]:
+            k = f"{m['chain']}|{m['ca']}"
+            info = tokens.get(k) or {}
+            ok, risk = tradable(info, safe.get(k), strict=False, key=k) if info else (None, [])
+            recent.append(dict(ca=m['ca'], sym=m['sym'], ts=m['ts'], usd=m['usd'], mc=m['mc'], mc_now=info.get('mc'),
+                               tradable=ok, risk=risk[:2]))
+        rows.append(dict(id=g['id'], name=g['name'], twitter=g.get('twitter'), chain=g['chain'], wallets=g['wallets'],
+                         grade=grade, why=why[:5], research=g.get('kol_stats') or {}, live=live,
+                         buys_3d=sum(1 for m in buys if NOW - m['ts'] < 3 * 86400),
+                         last_buy=buys[0]['ts'] if buys else None, recent=recent))
+    rows.sort(key=lambda r: (KOL_ORDER.index(r['grade']) if r['grade'] in KOL_ORDER else 9,
+                             -((r['research'] or {}).get('copy5_mean') or -9)))
+    return rows
+
+
 # ---------------------------------------------------------------- main
 def main():
     groups, watch = load_seed()                              # teams + wallets from the research
@@ -1056,6 +1154,8 @@ def main():
     st = load(os.path.join(DATA, 'state.json'), {})
     tokens = st.setdefault('tokens', {})
     moves = load(os.path.join(OUT, 'moves.json'), {}).get('rows', [])
+    kmoves = load(os.path.join(OUT, 'kol_moves.json'), {}).get('rows', [])   # KOL wallets: kept apart from teams
+    kol_ids = {g['id'] for g in groups if g.get('kind') == 'kol'}
     auto_flags(groups, moves, tokens)
     alerts = load(os.path.join(OUT, 'alerts.json'), {}).get('rows', [])
     disc = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'discovery.json'), {}).get('rows', [])}
@@ -1101,7 +1201,7 @@ def main():
         token_info('Solana', ['So11111111111111111111111111111111111111112'], tokens)
         sol_price = (tokens.get('Solana|So11111111111111111111111111111111111111112') or {}).get('price')
 
-    have = {(m['chain'], m['tx'], m['wallet'], m['ca'], m['side']) for m in moves}
+    have = {(m['chain'], m['tx'], m['wallet'], m['ca'], m['side']) for m in moves + kmoves}
     pending = []
     for m in newmoves:
         k = (m['chain'], m['tx'], m['wallet'], m['ca'], m['side'])
@@ -1135,15 +1235,26 @@ def main():
             continue                       # dust and rounding noise
         gids = watch.get(m['chain'], {}).get(m['wallet'] if m['chain'] == 'Solana' else m['wallet'].lower()) \
             or watch.get(m['chain'], {}).get(m['wallet'], [])
-        moves.append(dict(chain=m['chain'], wallet=m['wallet'], groups=gids, ts=m['ts'], side=m['side'],
-                          ca=m['ca'], sym=sym, usd=round(usd, 2) if usd else None,
-                          mc=info.get('mc'), tx=m['tx'], new=NOW))
+        row = dict(chain=m['chain'], wallet=m['wallet'], groups=gids, ts=m['ts'], side=m['side'],
+                   ca=m['ca'], sym=sym, usd=round(usd, 2) if usd else None,
+                   mc=info.get('mc'), tx=m['tx'], new=NOW)
+        team_ids = [g for g in gids if g not in kol_ids]
+        if team_ids and len(team_ids) < len(gids):
+            kmoves.append(dict(row, groups=[g for g in gids if g in kol_ids]))
+            row['groups'] = team_ids
+        if team_ids:
+            moves.append(row)
+        else:
+            kmoves.append(row)
 
     st['pending'] = pending[-500:]
     cut = NOW - KEEP_DAYS * 86400
     moves = [m for m in moves if m['ts'] >= cut]
     moves.sort(key=lambda m: -m['ts'])
     moves = moves[:6000]
+    kmoves = [m for m in kmoves if m['ts'] >= cut and m['side'] != 'internal']
+    kmoves.sort(key=lambda m: -m['ts'])
+    kmoves = kmoves[:6000]
     risk_tokens(moves, {g['id']: g for g in groups}, tokens)
 
     # group status from the freshest move
@@ -1487,6 +1598,14 @@ def main():
     save(os.path.join(OUT, 'alerts.json'), dict(updated=NOW, rows=alerts[:500]))
     save(os.path.join(OUT, 'hot.json'), dict(updated=NOW, rows=hrows[:800]))
     save(os.path.join(OUT, 'signals.json'), dict(updated=NOW, rows=srows[:400]))
+    try:
+        kol_followups(kmoves, tokens)
+        krows = kol_rows(groups, kmoves, tokens, st.get('safe') or {})
+    except Exception as e:
+        ERRORS.append(f'KOLs: {type(e).__name__} {str(e)[:80]}')
+        krows = []
+    save(os.path.join(OUT, 'kol_moves.json'), dict(updated=NOW, rows=kmoves))
+    save(os.path.join(OUT, 'kols.json'), dict(updated=NOW, rows=krows))
     save(os.path.join(OUT, 'discovery.json'), dict(updated=NOW, rows=drows[:400]))
     save(os.path.join(OUT, 'meta.json'), meta)
     save(os.path.join(DATA, 'state.json'), st)
