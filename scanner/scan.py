@@ -363,14 +363,14 @@ def scan_evm_wide(chain, cfg, wallets, st, newmoves):
     step = cfg.get('wide_range', 50)
     logs, fails = [], 0
     b = start
-    t_end = time.time() + min(90, max(20, (left() - SCAN_RESERVE) / 3))
+    t_end = time.time() + min(45, max(15, (left() - SCAN_RESERVE) / 5))   # leave time for the other chains
     while b <= head and left() > SCAN_RESERVE and time.time() < t_end and fails < 4:
         e = min(head, b + step - 1)
         try:
             got = []
-            for i in range(0, len(tops), 30):           # public endpoints cap topics per filter
+            for i in range(0, len(tops), 16):           # public endpoints cap topics per filter
                 got += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e),
-                                                 'topics': [TRANSFER, None, tops[i:i + 30]]}]) or []
+                                                 'topics': [TRANSFER, None, tops[i:i + 16]]}]) or []
             logs += got
             cur['wlast'] = e
             b = e + 1
@@ -1215,7 +1215,10 @@ def main():
     proven = {}
     for chain, ws in watch.items():
         proven[chain] = {w for w, gids in ws.items() if any(x in good_ids for x in gids)}
-    chains_order = ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']
+    evm_order = ['Robinhood', 'BSC', 'Base', 'Ethereum']
+    k = st.get('pass_n', 0) % len(evm_order)                       # rotate so no chain is always last in line
+    st['pass_n'] = st.get('pass_n', 0) + 1
+    chains_order = ['Solana'] + evm_order[k:] + evm_order[:k]
     sol_deadline = time.time() + 0.40 * (left() - SCAN_RESERVE)    # Solana may not starve the EVM chains
     for chain in chains_order:
         if left() < SCAN_RESERVE + 20:
@@ -1229,7 +1232,7 @@ def main():
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
             elif chain in ('BSC', 'Base'):
                 try:
-                    wide = sorted(w.lower() for w in proven.get(chain, ()))[:90]   # best teams only: these calls are slow
+                    wide = sorted(w.lower() for w in proven.get(chain, ()))[:64]   # best teams only: these calls are slow
                     scan_evm_wide(chain, EVM[chain], wide, st, newmoves)
                 except Exception as e:
                     ERRORS.append(f'{chain} wide: {type(e).__name__} {str(e)[:80]}')
