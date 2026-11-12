@@ -21,6 +21,6 @@ jobs:
         env:
           NTFY_TOPIC: 'insider-live-49ab55a62a52'
           FAST_SECONDS: '19500'
-          FAST_MIN_USD: '150'
+          FAST_MIN_USD: '50'
           FAST_CYCLE: '20'
         run: python scanner/fast.py
