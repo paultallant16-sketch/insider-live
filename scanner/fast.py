@@ -63,6 +63,7 @@ class Watch:
         self.sent_times = []
         self.sol_px = None
         self.sol_px_at = 0
+        self.errs = {}
         self.reload()
 
     def reload(self):
@@ -122,11 +123,27 @@ class Watch:
         tops = [S.topic(w) for w in ws]
         logs, b = [], last + 1
         t_end = time.time() + 20
-        while b <= head and time.time() < t_end:
+        fails = 0
+        while b <= head and time.time() < t_end and fails < 3:
             e = min(head, b + step - 1)
+            got, bad = [], False
             for i in range(0, len(tops), size):
-                logs += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e),
-                                                  'topics': [S.TRANSFER, None, tops[i:i + size]]}]) or []
+                q = [{'fromBlock': hex(b), 'toBlock': hex(e), 'topics': [S.TRANSFER, None, tops[i:i + size]]}]
+                for k in range(len(urls)):           # spread the load: rotate endpoints, move on if one says "limit"
+                    rpc.i += 1
+                    try:
+                        got += rpc.call('eth_getLogs', q, tries=1) or []
+                        break
+                    except Exception:
+                        time.sleep(0.5)
+                else:
+                    bad = True
+            if bad:
+                fails += 1
+                self.errs[chain] = self.errs.get(chain, 0) + 1
+                time.sleep(1.5)
+                continue                             # retry the same window (it is only seconds old)
+            logs += got
             self.evm_last[chain] = e
             b = e + 1
         S._evm_moves(chain, cfg, rpc, logs, set(ws), out)
@@ -246,7 +263,16 @@ def main():
             log('handle', type(e).__name__, str(e)[:120])
         n += 1
         if n % 30 == 0:
-            log(f'cycle {n}: {len(moves)} moves, {time.time() - t0:.0f}s', S.ERRORS[:3])
+            lag = {}
+            for c in EVM_FAST:
+                try:
+                    h = int(S.RPC(c, S.EVM[c].get('wide') or S.EVM[c]['rpcs']).call('eth_blockNumber', [], tries=1), 16)
+                    lag[c] = int((h - w.evm_last.get(c, h)) * S.EVM[c]['block_s'])
+                except Exception:
+                    lag[c] = '?'
+            log(f'cycle {n}: {len(moves)} moves, {time.time() - t0:.0f}s, seconds behind', lag,
+                'endpoint errors', w.errs, S.ERRORS[:2])
+            w.errs = {}
         if time.time() - w.loaded > 1800:
             w.reload()                                   # new teams / flags / follow scores from the slow loop
         time.sleep(max(2.0, CYCLE - (time.time() - t0)))
