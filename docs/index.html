@@ -340,13 +340,13 @@ function vTeams(){
   const order={Elite:0,Strong:1,Tested:2,Decent:3,Unproven:4};
   const rows=D.groups.filter(g=>g.kind!=='kol'&&inChain(g)&&(!q||[g.nick,g.label,g.name,g.style,g.id,g.research_name,arr(g.wallets).map(w=>w&&w.w).join(' ')].map(str).join(' ').toLowerCase().includes(q)))
     .sort((a,b)=>((act[b.id]?.b24||0)-(act[a.id]?.b24||0))||((num(act[b.id]?.lb?.ts)||0)-(num(act[a.id]?.lb?.ts)||0))||((order[a.grade]??5)-(order[b.grade]??5)));
-  $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. Each team has a nickname so you can follow it, a style (how its wallets are linked) and a grade from its track record before we started watching. Tap a team to see its wallets.</p>
-  <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th class="n hide-m">Track record</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
+  $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. <b>Their record</b> is what the team itself made: research wins from their own (usually very early) entries. <b>If you copied their trades</b> is what you would have made in the last 3 days buying when they buy and selling when they sell. <b>If you bought and held</b> is the same buys kept until now. A team can win big while copying it loses: they get in first and out first. Tap a team to see its wallets.</p>
+  <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th>Their record vs. copying them</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
   ${rows.map(g=>{const a=act[g.id],n=cnt(g.n)||arr(g.wallets).length,L=cnt(g.legit);return`<tr><td><details data-id="${esc(g.id)}"><summary><b>${L?'★ ':''}${esc(g.nick||g.name||g.id)}</b> <span class="muted">· ${esc(g.style||g.kind||'')}</span><div class="chain">${esc(g.chain||'?')} · ${plural(n,'wallet')}${g.status?` · <span class="tag st-${esc(g.status)}">${esc(g.status)}</span>`:''}</div></summary>
     <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div>${g.flag?`<div class="down" style="margin-top:4px;font-size:13px">⚠ ${esc(g.flag)}: ${esc(g.flag_reason||'')}. This team never triggers buy signals.</div>`:''}<div class="faint" style="font-size:12px;margin-top:4px">${cnt(g.winners)} wins / ${cnt(g.failed)} misses · Research id ${esc(g.id)} · ${esc(g.research_name||g.name||'')}</div>
     <div class="wl">${arr(g.wallets).filter(w=>w&&w.w).map(w=>`<a class="tag mono" href="${esc(`https://gmgn.ai/${net(GM,g.chain)}/address/${encodeURIComponent(str(w.w))}`)}" target="_blank" rel="noopener">${short(w.w)}${w.role?' · '+esc(w.role):''}</a>`).join('')}</div></details></td>
     <td><span class="tag g-${esc(g.grade)}">${esc(g.grade||'—')}</span>${g.flag?`<div><span class="tag down" title="${esc(g.flag_reason||'')}">⚠ ${esc(g.flag)}</span></div>`:''}</td>
-    <td class="n hide-m">${g.follow?`<div class="${num(g.follow.med)>=0?'up':'down'}" title="Median change in market cap since each of this team's buys in the last 3 days (n=${cnt(g.follow.n)})">Follow: ${pct(num(g.follow.med))} <span class="faint">(${cnt(g.follow.n)})</span></div>`:''}${cnt(g.winners)} wins / ${cnt(g.failed)} misses${L?`<div class="up" style="font-size:12px">★ early on ${plural(L,'lasting token')}</div>`:''}${num(g.profit)>0?`<div class="chain">${usd(g.profit)} profit found</div>`:''}</td>
+    <td style="min-width:190px">${teamRecord(g,L)}</td>
     <td>${a&&a.lb?`<span class="buy">bought</span> <b>${symOf(a.lb)}</b><div class="chain">${ago(a.lb.ts)}</div>`:'<span class="faint">no buys seen yet</span>'}</td>
     <td class="n hide-m">${a?a.b24:0}${a&&a.u24?`<div class="chain">${usd(a.u24)}</div>`:''}</td>
     <td class="hide-m muted">${a?[...a.toks].slice(0,5).map(esc).join(', '):''}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No teams match.</td></tr>'}
@@ -393,6 +393,22 @@ function vKols(){
   </tbody></table></div>`;
 }
 const KOL_ORDER=['Follow','Watch','Not enough data',"Don't follow",'Exit liquidity','Avoid: dump ring'];
+function teamVerdict(g){
+  const c=g.copy,f=g.follow;
+  if(g.flag)return['down','Do not copy: caught dumping on followers'];
+  if(!c||cnt(c.n)<5)return['faint','Not enough recent buys to judge yet'];
+  if(num(c.med)>=0&&num(c.mean)>=0)return['up','Copying their trades has paid lately'];
+  if(f&&num(f.med)<=-0.3)return['down','They win by getting out fast; copying and holding loses'];
+  return['muted','Mixed: copying them is roughly break-even'];
+}
+function teamRecord(g,L){
+  const v=teamVerdict(g),c=g.copy,f=g.follow,best=arr(g.best).filter(b=>num(b.x)>=1.5);
+  const line=(lab,x,tip)=>x&&cnt(x.n)?`<div title="${esc(tip)}"><span class="faint">${lab}</span> <b class="${num(x.med)>=0?'up':'down'}">${pct(num(x.med))}</b> <span class="faint">median · won ${Math.round(num(x.win)*100)}% of ${cnt(x.n)}</span></div>`:'';
+  return`<div class="${v[0]}" style="font-weight:600;font-size:13px;margin-bottom:3px">${esc(v[1])}</div>
+  <div style="font-size:12px"><span class="faint">Their record:</span> ${cnt(g.winners)} wins / ${cnt(g.failed)} misses${num(g.profit)>0?` · ${usd(g.profit)} profit`:''}${L?` · <span class="up">★ early on ${plural(L,'lasting token')}</span>`:''}</div>
+  ${best.length?`<div style="font-size:12px"><span class="faint">Best hits (3d, from their entry):</span> ${best.map(b=>`${esc(b.sym)} <b class="up">${num(b.x).toFixed(1)}x</b>`).join(', ')}</div>`:''}
+  <div style="font-size:12px;margin-top:2px">${line('If you copied their trades:',c,'Buy when they buy, sell when they first sell (or hold if they still do). Last 3 days, at the market cap when each trade was seen.')}${line('If you bought and held:',f,'Buy when they buy and keep it until now. Last 3 days.')}</div>`;
+}
 function vNew(){
   const all0=D.disc.filter(r=>inChain(r)&&match(r)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const rows=all.filter(r=>newAll||arr(r.first_buys).length).sort((x,y)=>(num(y.created)||0)-(num(x.created)||0));
