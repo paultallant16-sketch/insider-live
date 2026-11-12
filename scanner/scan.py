@@ -1145,7 +1145,7 @@ def mine_trades(mine, tokens, watched):
             toks[key] = dict(pool=pool, created=cr, at=0, buys={}, peak=mc, peak_ts=NOW, sym='')
     young = [k for k, v in toks.items() if NOW - v['created'] < 12 * 3600 and NOW - v['at'] > 480]
     young.sort(key=lambda k: toks[k]['at'])
-    young = young[:12]
+    young = young[:4 if left() < 60 else 10]          # a few every pass even when the pass is out of time
     by_chain = {}
     for key in young:
         if (tokens.get(key) or {}).get('at') != NOW:
@@ -1153,8 +1153,6 @@ def mine_trades(mine, tokens, watched):
     for chain, cas in by_chain.items():               # price + supply, to turn each trade into a market cap
         token_info(chain, cas, tokens)
     for key in young:
-        if left() < 25:
-            break
         chain, ca = key.split('|', 1)
         t = toks[key]
         t['at'] = NOW
@@ -1379,7 +1377,7 @@ def main():
     chains_order = ['Solana'] + evm_order[k:] + evm_order[:k]
     # fresh launches first: the new / trending lists feed both discovery and team mining. Done before the chain
     # scans so a slow pass can never skip them (it did, and mining silently collected nothing).
-    t_disc = time.time() + 45
+    t_disc = time.time() + 25
     for chain in ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']:
         if time.time() > t_disc:
             break
@@ -1387,11 +1385,6 @@ def main():
             discover(chain, disc, st)
         except Exception as e:
             ERRORS.append(f'discovery {chain}: {type(e).__name__}')
-    try:                                              # who bought those young tokens early ($50+)
-        auto = mine_trades(mine, tokens, {w for c in watch.values() for w in c})
-    except Exception as e:
-        auto = mine.get('teams', [])
-        ERRORS.append(f'mining: {type(e).__name__} {str(e)[:80]}')
     sol_deadline = time.time() + 0.40 * (left() - SCAN_RESERVE)    # Solana may not starve the EVM chains
     for chain in chains_order:
         if left() < SCAN_RESERVE + 20:
@@ -1888,6 +1881,11 @@ def main():
     except Exception as e:
         ERRORS.append(f'KOLs: {type(e).__name__} {str(e)[:80]}')
         krows = []
+    try:                                              # who bought those young tokens early ($50+)
+        auto = mine_trades(mine, tokens, {w for c in watch.values() for w in c})
+    except Exception as e:
+        auto = mine.get('teams', [])
+        ERRORS.append(f'mining: {type(e).__name__} {str(e)[:80]}')
     try:
         save(os.path.join(DATA, 'mine.json'), mine)
         save(os.path.join(OUT, 'auto_teams.json'), dict(updated=NOW, tokens_tracked=len(mine.get('tok', {})),
