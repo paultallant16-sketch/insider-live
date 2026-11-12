@@ -657,6 +657,9 @@ DISC_MIN_MC = 500_000
 DISC_MAX_AGE = 7 * 86400
 
 
+FRESH = []              # (chain, ca, pool, created, mc) seen this pass on GeckoTerminal's new / trending lists
+
+
 def discover(chain, disc, st):
     """Collect tokens on this chain that are past $500K: two GeckoTerminal lists per pass, rotating through
     trending (5m/1h/6h/24h) and new pools, so over a few passes every list is covered."""
@@ -671,6 +674,14 @@ def discover(chain, disc, st):
         for p in (r or {}).get('data', []):
             a = p.get('attributes', {})
             mc = _f(a.get('market_cap_usd')) or _f(a.get('fdv_usd')) or 0
+            try:                                     # young pools with real money in them: candidates for mining
+                cr = int(dt.datetime.fromisoformat(a['pool_created_at'].replace('Z', '+00:00')).timestamp())
+                b0 = ((p.get('relationships', {}).get('base_token', {}).get('data', {}) or {}).get('id', '')
+                      .split('_', 1)[-1])
+                if NOW - cr < 12 * 3600 and (_f(a.get('reserve_in_usd')) or 0) >= 5000 and mc >= 20_000 and b0:
+                    FRESH.append((chain, b0 if chain == 'Solana' else b0.lower(), a.get('address'), cr, mc))
+            except Exception:
+                pass
             if mc < DISC_MIN_MC or mc > 2_000_000_000:
                 continue
             sym0 = (a.get('name') or '?').split(' / ')[0].strip().upper()
@@ -1118,6 +1129,148 @@ def risk_tokens(moves, gmap, tokens):
             RISK_TOK.setdefault(k, []).append(f'insiders dumping ${v:,.0f} of tokens they never bought')
 
 
+# ---------------------------------------------------------------- team mining: find teams we do not watch yet
+MINE_MIN_USD = 50
+
+
+def mine_trades(mine, tokens, watched):
+    """Who buys young tokens early, and did the token run after them? From GeckoTerminal trade lists (any wallet,
+    $50+), polled while each token is under 12h old. A token is scored once it is 24h old: a buyer 'hit' if the
+    token later reached 2x its entry market cap (and at least $100K) after it bought. Wallets that hit again and
+    again, and the wallets that buy alongside them in the same seconds, become auto-found teams."""
+    toks = mine.setdefault('tok', {})
+    for chain, ca, pool, cr, mc in FRESH:
+        key = f'{chain}|{ca}'
+        if key not in toks and pool and len(toks) < 400:
+            toks[key] = dict(pool=pool, created=cr, at=0, buys={}, peak=mc, peak_ts=NOW, sym='')
+    young = [k for k, v in toks.items() if NOW - v['created'] < 12 * 3600 and NOW - v['at'] > 480]
+    young.sort(key=lambda k: toks[k]['at'])
+    young = young[:12]
+    by_chain = {}
+    for key in young:
+        if (tokens.get(key) or {}).get('at') != NOW:
+            by_chain.setdefault(key.split('|', 1)[0], []).append(key.split('|', 1)[1])
+    for chain, cas in by_chain.items():               # price + supply, to turn each trade into a market cap
+        token_info(chain, cas, tokens)
+    for key in young:
+        if left() < SCAN_RESERVE / 2:
+            break
+        chain, ca = key.split('|', 1)
+        t = toks[key]
+        t['at'] = NOW
+        r = GT.get(f"/networks/{GT_NET[chain]}/pools/{t['pool']}/trades?trade_volume_in_usd_greater_than={MINE_MIN_USD}")
+        info = tokens.get(key) or {}
+        supply = (info['mc'] / info['price']) if info.get('mc') and info.get('price') else None
+        for d in sorted((r or {}).get('data', []), key=lambda d: d.get('attributes', {}).get('block_timestamp', '')):
+            a = d.get('attributes', {})
+            ta = (a.get('to_token_address') or '') if a.get('kind') == 'buy' else (a.get('from_token_address') or '')
+            if (ta if chain == 'Solana' else ta.lower()) != ca:
+                continue
+            px = _f(a.get('price_to_in_usd') if a.get('kind') == 'buy' else a.get('price_from_in_usd'))
+            if not supply and px and t.get('peak') and info.get('price'):
+                supply = info['mc'] / info['price']
+            mc_at = px * supply if px and supply else None
+            try:
+                ts = int(dt.datetime.fromisoformat(a['block_timestamp'].replace('Z', '+00:00')).timestamp())
+            except Exception:
+                continue
+            if mc_at and mc_at > (t.get('peak') or 0):
+                t['peak'], t['peak_ts'] = mc_at, ts
+            if a.get('kind') != 'buy' or (_f(a.get('volume_in_usd')) or 0) < MINE_MIN_USD:
+                continue
+            w = a.get('tx_from_address') or ''
+            w = w if chain == 'Solana' else w.lower()
+            if w and w not in t['buys'] and len(t['buys']) < 200 and mc_at:
+                t['buys'][w] = [ts, round(_f(a.get('volume_in_usd')) or 0), round(mc_at)]
+        t['sym'] = info.get('sym') or t.get('sym') or ''
+    for key, t in toks.items():                      # every pass: the current market cap may be a new high
+        info = tokens.get(key) or {}
+        if info.get('mc') and info.get('at') == NOW and info['mc'] > (t.get('peak') or 0):
+            t['peak'], t['peak_ts'] = info['mc'], NOW
+    # score tokens that are a day old
+    mw = mine.setdefault('w', {})                    # wallet -> [hits, tries, chain, last_ts, [best hits]]
+    pairs = mine.setdefault('pairs', {})
+    for key in [k for k, v in toks.items() if NOW - v['created'] >= 24 * 3600]:
+        t = toks.pop(key)
+        chain = key.split('|', 1)[0]
+        peak, pts = t.get('peak') or 0, t.get('peak_ts') or 0
+        hitters = []
+        for w, (ts, usd, e) in t['buys'].items():
+            row = mw.setdefault(w, [0, 0, chain, 0, []])
+            row[1] += 1
+            row[3] = max(row[3], ts)
+            if peak >= 100_000 and ts <= pts and e and peak / e >= 2:
+                row[0] += 1
+                row[4] = (row[4] + [[t.get('sym') or key[-6:], round(peak / e, 1)]])[-5:]
+                hitters.append((ts, w))
+        hitters.sort()
+        for i in range(len(hitters)):                # bought within 10 s of each other, and both later hit
+            for j in range(i + 1, min(len(hitters), i + 12)):
+                if hitters[j][0] - hitters[i][0] > 10:
+                    break
+                pk = '|'.join(sorted((hitters[i][1], hitters[j][1])))
+                pairs[pk] = pairs.get(pk, 0) + 1
+    if len(mw) > 20000:                              # forget one-off wallets that never hit
+        for w in sorted(mw, key=lambda w: (mw[w][0], mw[w][3]))[:len(mw) - 20000]:
+            mw.pop(w)
+    for pk in [k for k in pairs if any(x not in mw for x in k.split('|'))]:
+        pairs.pop(pk)
+    # build auto teams
+    good = {w for w, r in mw.items() if r[0] >= 3 and r[0] / max(1, r[1]) >= 0.5 and w not in watched}
+    parent = {w: w for w in good}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for pk, n in pairs.items():
+        a, b = pk.split('|')
+        if n >= 2 and a in good and b in good:
+            parent[find(a)] = find(b)
+    clusters = {}
+    for w in good:
+        clusters.setdefault(find(w), []).append(w)
+    teams = []
+    for ws in clusters.values():
+        ws.sort(key=lambda w: -mw[w][0])
+        hits = max(mw[w][0] for w in ws)
+        tries = max(mw[w][1] for w in ws)
+        best = sorted([h for w in ws for h in mw[w][4]], key=lambda h: -h[1])[:3]
+        gid = 'AUTO:' + f'{zlib.crc32("".join(sorted(ws)).encode()):08x}'[:6]
+        teams.append(dict(id=gid, chain=mw[ws[0]][2], wallets=ws[:12], hits=hits, tries=tries, best=best,
+                          rate=round(hits / max(1, tries), 2)))
+    teams.sort(key=lambda t: (-t['hits'], -t['rate']))
+    mine['teams'] = teams[:120]
+    return mine['teams']
+
+
+def add_auto_teams(groups, watch, mine):
+    """Auto-found teams join the watch list. They drive signals only with 4+ hits at 60%+, and then still
+    have to pass the live copy / peak gates like every other team."""
+    have = {g['id'] for g in groups}
+    new = []
+    for t in mine.get('teams', []):
+        if t['id'] in have:
+            continue
+        w0 = t['wallets']
+        g = dict(id=t['id'], chain=t['chain'], kind='auto', tier='A', name=f"Auto-found crew ({len(w0)})",
+                 n=len(w0), winners=t['hits'], failed=t['tries'] - t['hits'], profit=0, seed_last_ts=None,
+                 wallets=[dict(w=w, role='member') for w in w0],
+                 legit=1 if t['hits'] >= 4 and t['rate'] >= 0.6 else 0, auto_best=t['best'])
+        new.append(g)
+        for w in w0:
+            lst = watch.setdefault(t['chain'], {}).setdefault(w, [])
+            if t['id'] not in lst:
+                lst.append(t['id'])
+    for g in label_groups(new):
+        g['style'] = 'auto-found: early on tokens that ran'
+        g['about'] = ('Found by the scanner itself: these wallets bought early ($50+) on young tokens that went on to '
+                      '2x+ after them, again and again' + (', and buy in the same seconds as each other' if g['n'] > 1 else '') + '.')
+        groups.append(g)
+    return groups
+
+
 KOL_ORDER = ['Follow', 'Watch', 'Not enough data', "Don't follow", 'Exit liquidity', 'Avoid: dump ring']
 
 
@@ -1199,6 +1352,11 @@ def kol_rows(groups, kmoves, tokens, safe):
 def main():
     groups, watch = load_seed()                              # teams + wallets from the research
     load_flags(groups, watch)                                # research flags + KOL dump-ring wallets
+    mine = load(os.path.join(DATA, 'mine.json'), {})         # team mining state (who buys early, who hits)
+    try:
+        groups = add_auto_teams(groups, watch, mine)
+    except Exception as e:
+        ERRORS.append(f'auto teams: {type(e).__name__} {str(e)[:80]}')
     st = load(os.path.join(DATA, 'state.json'), {})
     tokens = st.setdefault('tokens', {})
     moves = load(os.path.join(OUT, 'moves.json'), {}).get('rows', [])
@@ -1463,21 +1621,50 @@ def main():
         if out_mc:                                   # copy their trade: in when they buy, out when they first sell
             cpy.setdefault(g, []).append(max(-1.0, min(out_mc / m['mc'] - 1, 10.0)))
 
+    # room to take profit: from the market cap when we saw each first buy (when a follower could get in) to the
+    # highest market cap seen after it. Kept per team+token across passes, since most tokens peak and die.
+    pk = st.setdefault('pk', {})
+    seen_mc = {}
+    for m in moves:
+        if m.get('mc'):
+            seen_mc.setdefault(f"{m['chain']}|{m['ca']}", []).append((m['ts'], m['mc']))
+    for (g, c, ca), m in firsts.items():
+        key = f'{c}|{ca}'
+        kk = f'{g}|{key}'
+        row = pk.get(kk)
+        if not row or row[1] != m['ts']:
+            row = pk[kk] = [m['mc'], m['ts'], m['mc'], m['sym']]
+        now_mc = mc_now.get(key) or (tokens.get(key) or {}).get('mc')
+        later = [x for t, x in seen_mc.get(key, []) if t >= m['ts']]
+        row[2] = max([row[2], now_mc or 0] + later)
+    pk_by = {}
+    for kk, (e, ts, top, sym) in list(pk.items()):
+        if NOW - ts > 3 * 86400:
+            pk.pop(kk)
+            continue
+        if NOW - ts >= 1800 and e:
+            pk_by.setdefault(kk.split('|')[0], []).append(top / e - 1)
+
     def stat(v):
         v = sorted(v)
         return dict(n=len(v), med=round(v[len(v) // 2], 3), win=round(sum(x > 0 for x in v) / len(v), 2),
                     mean=round(sum(v) / len(v), 3))
     follow = {g: stat(v) for g, v in fol.items()}
     copy = {g: stat(v) for g, v in cpy.items()}
+    peak = {g: dict(n=len(v), med=round(sorted(v)[len(v) // 2], 3), x2=round(sum(x >= 1 for x in v) / len(v), 2),
+                    x15=round(sum(x >= 0.5 for x in v) / len(v), 2)) for g, v in pk_by.items()}
     for r in out_groups:
         if r['id'] in follow:
             r['follow'] = follow[r['id']]
         if r['id'] in copy:
             r['copy'] = copy[r['id']]
+        if r['id'] in peak:
+            r['peak'] = peak[r['id']]
         if r['id'] in hits:
             r['best'] = [dict(x=x, sym=sy, chain=c, ca=ca) for x, sy, c, ca in sorted(hits[r['id']], reverse=True)[:3]]
-    trusted = {g for g in good_ids if (copy.get(g) or {}).get('n', 0) >= 5 and copy[g]['med'] >= 0
-               and copy[g]['mean'] >= 0}             # copying their trades (in with them, out with them) paid
+    trusted = {g for g in good_ids                   # after we could get in, their tokens kept running often enough
+               if ((peak.get(g) or {}).get('n', 0) >= 5 and (peak[g]['x2'] >= 0.25 or peak[g]['med'] >= 0.5))
+               or ((copy.get(g) or {}).get('n', 0) >= 5 and copy[g]['med'] >= 0 and copy[g]['mean'] >= 0)}
 
     # buy signals: proven teams putting real money into a fresh launch, not dust and not exits
     sigs = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'signals.json'), {}).get('rows', [])}
@@ -1686,6 +1873,14 @@ def main():
     except Exception as e:
         ERRORS.append(f'KOLs: {type(e).__name__} {str(e)[:80]}')
         krows = []
+    try:
+        watched = {w for c in watch.values() for w in c}
+        auto = mine_trades(mine, tokens, watched)
+        save(os.path.join(DATA, 'mine.json'), mine)
+        save(os.path.join(OUT, 'auto_teams.json'), dict(updated=NOW, tokens_tracked=len(mine.get('tok', {})),
+                                                         wallets_scored=len(mine.get('w', {})), rows=auto))
+    except Exception as e:
+        ERRORS.append(f'mining: {type(e).__name__} {str(e)[:80]}')
     save(os.path.join(OUT, 'kol_moves.json'), dict(updated=NOW, rows=kmoves))
     save(os.path.join(OUT, 'kols.json'), dict(updated=NOW, rows=krows))
     save(os.path.join(OUT, 'discovery.json'), dict(updated=NOW, rows=drows[:400]))

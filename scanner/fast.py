@@ -17,10 +17,10 @@ import scan as S  # noqa: E402
 S.RUN_BUDGET = 1e12                      # scan.left() is always large here; this loop has its own end time
 END = time.time() + float(os.environ.get('FAST_SECONDS', str(5 * 3600 + 1500)))
 TOPIC = os.environ.get('NTFY_TOPIC', '').strip()
-MIN_USD = float(os.environ.get('FAST_MIN_USD', '150'))
+MIN_USD = float(os.environ.get('FAST_MIN_USD', '50'))
 CYCLE = float(os.environ.get('FAST_CYCLE', '20'))
 MAX_AGE = 7 * 86400                      # pre-pump teams buy tokens up to days old; older than a week is not "new"
-PER_HOUR = 20                            # never more than this many fast alerts an hour
+PER_HOUR = 30                            # never more than this many fast alerts an hour
 EVM_FAST = ('Robinhood', 'BSC', 'Base')  # Ethereum (12 s blocks, no cheap wallet-only logs) stays on the slow loop
 SOL = 'So11111111111111111111111111111111111111112'
 
@@ -33,6 +33,10 @@ def load_targets():
     """Proven, unflagged team wallets per chain, plus each team's live Follow score from the dashboard data."""
     groups, watch = S.load_seed()
     S.load_flags(groups, watch)
+    try:                                                # teams the slow loop found by itself
+        groups = S.add_auto_teams(groups, watch, S.load(os.path.join(S.DATA, 'mine.json'), {}))
+    except Exception:
+        pass
     good = {g['id'] for g in groups if g.get('kind') not in ('kol', 'ring') and not g.get('flag')
             and (g['grade'] in ('Elite', 'Strong', 'Tested') or g.get('legit'))}
     gmap = {g['id']: g for g in groups}
@@ -44,6 +48,7 @@ def load_targets():
         if gid in live:
             g['follow'] = live[gid].get('follow')
             g['copy'] = live[gid].get('copy')
+            g['peak'] = live[gid].get('peak')
             if live[gid].get('flag'):                   # flagged live (dumps tokens it never bought)
                 good.discard(gid)
     tgt = {}
@@ -195,8 +200,8 @@ class Watch:
                     total += v
                 wallets.add(m['wallet'])
                 teams += [g for g in gids if g not in teams]
-            if total < MIN_USD or (total < 2 * MIN_USD and len(wallets) < 2):
-                continue                                 # small single-wallet buys are noise
+            if total < MIN_USD:
+                continue
             sf = S.safety(chain, ca, {'safe': self.safe}, budget=10 ** 9)
             ok, why = S.tradable(info, sf)
             if sf and sf.get('honeypot') is True:
@@ -214,8 +219,8 @@ class Watch:
         names = []
         for g in teams[:3]:
             gg = self.gmap.get(g, {})
-            f = gg.get('copy') or {}
-            fs = f" (copying them {f['med']:+.0%} median over {f['n']})" if f.get('n') else ''
+            f = gg.get('peak') or {}
+            fs = f" (after entry: 2x+ on {f['x2']:.0%} of {f['n']}, peak median {f['med']:+.0%})" if f.get('n') else ''
             names.append(f"{gg.get('nick') or gg.get('name') or g}{' *' if gg.get('legit') else ''}{fs}")
         mc, liq = info.get('mc') or 0, info.get('liq') or 0
         age = (S.NOW - created) / 3600 if created else None
