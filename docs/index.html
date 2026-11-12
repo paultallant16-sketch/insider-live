@@ -97,7 +97,7 @@ details summary{cursor:pointer}.wl{display:flex;flex-wrap:wrap;gap:6px;margin-to
 <div class="tabs" id="tabs">
   <button data-v="signals" class="sigtab on">Buy signals</button>
   <button data-v="hot">Hot now</button>
-  <button data-v="best">Best last 3 days</button>
+  <button data-v="best">Best last 7 days</button>
   <button data-v="feed">Live feed</button>
   <button data-v="teams">Teams</button>
   <button data-v="kols">KOLs</button>
@@ -163,8 +163,8 @@ const rowsOf=x=>arr(x&&x.rows).filter(r=>r&&typeof r==='object');
 async function load(){
   if(loading)return;loading=true;
   try{
-    const [m,g,a,d,h,meta,s,k]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json','signals.json','kols.json'].map(j));
-    D={moves:rowsOf(m).sort((x,y)=>(num(y.ts)||0)-(num(x.ts)||0)),groups:rowsOf(g),kols:rowsOf(k),alerts:rowsOf(a),disc:rowsOf(d),hot:h?rowsOf(h):null,sig:s?rowsOf(s):null,meta:meta||{}};
+    const [m,g,a,d,h,meta,s,k,sc]=await Promise.all(['moves.json','groups.json','alerts.json','discovery.json','hot.json','meta.json','signals.json','kols.json','scorecard.json'].map(j));
+    D={moves:rowsOf(m).sort((x,y)=>(num(y.ts)||0)-(num(x.ts)||0)),groups:rowsOf(g),kols:rowsOf(k),card:(sc&&sc.chains)||{},alerts:rowsOf(a),disc:rowsOf(d),hot:h?rowsOf(h):null,sig:s?rowsOf(s):null,meta:meta||{}};
     GMAP=Object.fromEntries(D.groups.filter(x=>x.id!=null).map(x=>[x.id,x]));
     if(!D.hot)D.hot=buildHot();
     lastLoad=Date.now();
@@ -218,7 +218,7 @@ function kpis(){
     ['Buy signals in last 24h',D.sig?s24.length:'—',D.sig?'proven teams, real money, fresh tokens':'waiting for the scanner'],
     ['Proven-team buys in last 6h',b6.length+' · '+usd(b6.reduce((s,m)=>s+(num(m.usd)||0),0)),'$'+FEED_MIN+'+ buys only'],
     ['Teams buying in last 24h',act.size+' of '+D.groups.filter(g=>g.kind!=='kol'&&inChain(g)).length,''],
-    ['Picks up since first team buy (3d)',b3.length?Math.round(100*upN/b3.length)+'% of '+b3.length:'—','all teams, all sizes'],
+    ['Picks up since first team buy (7d)',b3.length?Math.round(100*upN/b3.length)+'% of '+b3.length:'—','all teams, all sizes'],
   ].map(([k,v,s])=>`<div class="kpi"><span>${esc(k)}</span><b>${esc(v)}</b>${s?`<small>${esc(s)}</small>`:''}</div>`).join('');
 }
 let lastView=null;
@@ -300,12 +300,12 @@ function vHot(){
     (rows.length?`<div class="grid">${rows.slice(0,60).map(tokCard).join('')}</div>`:`<div class="card empty">No proven-team buys of real size on ${age==='fresh'?'fresh ':''}tokens in the last 6 hours${chain!=='All'?' on '+esc(chain):''}${q?' matching your search':''}.${hidden?` ${plural(hidden,'token')} with only small or unproven buys ${hidden===1?'is':'are'} hidden; tap "Show small buys".`:''}${age==='fresh'?' Or try "Any age".':''}</div>`);
 }
 
-/* ---------- Best last 3 days ---------- */
+/* ---------- Best last 7 days ---------- */
 function vBest(){
   const all0=D.hot.filter(h=>inChain(h)&&num(h.change)!=null&&freshOK(h)&&match(h)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
   const n=all.length,upN=all.filter(h=>num(h.change)>0).length,med=median(all.map(h=>num(h.change))),dbl=all.filter(h=>num(h.change)>=1).length;
   const rows=[...all].sort((a,b)=>bestMode==='best'?num(b.change)-num(a.change):num(a.change)-num(b.change));
-  $('#view').innerHTML=`<p class="lead">Every token a team bought in the last 3 days, ranked by how far its market cap has moved since the first team buy. This is the honest scoreboard: the losers are shown too.</p>${freshBar()}
+  $('#view').innerHTML=`<p class="lead">Every token a team bought in the last 7 days, ranked by how far its market cap has moved since the first team buy. This is the honest scoreboard: the losers are shown too.</p>${freshBar()}
   <div class="summary">
     <div class="kpi"><span>Tokens tracked</span><b>${n}</b></div>
     <div class="kpi"><span>Up since first team buy</span><b>${n?Math.round(100*upN/n)+'%':'—'}</b><div class="meter${n?'':' none'}"><i style="width:${n?(100*upN/n).toFixed(1):0}%"></i></div></div>
@@ -340,7 +340,8 @@ function vTeams(){
   const order={Elite:0,Strong:1,Tested:2,Decent:3,Unproven:4};
   const rows=D.groups.filter(g=>g.kind!=='kol'&&inChain(g)&&(!q||[g.nick,g.label,g.name,g.style,g.id,g.research_name,arr(g.wallets).map(w=>w&&w.w).join(' ')].map(str).join(' ').toLowerCase().includes(q)))
     .sort((a,b)=>((act[b.id]?.b24||0)-(act[a.id]?.b24||0))||((num(act[b.id]?.lb?.ts)||0)-(num(act[a.id]?.lb?.ts)||0))||((order[a.grade]??5)-(order[b.grade]??5)));
-  $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. <b>Their record</b> is what the team itself made: research wins from their own (usually very early) entries. <b>If you copied their trades</b> is what you would have made in the last 3 days buying when they buy and selling when they sell. <b>From when you could get in, peak after</b> is the best case: from the market cap when we saw their buy to the highest point after it, so it shows whether there was room to take profit before the token died. <b>If you bought and held</b> is the same buys kept until now. A team can win big while copying it loses: they get in first and out first. Tap a team to see its wallets.</p>
+  $('#view').innerHTML=`<p class="lead">Every team we watch, most active first. <b>Their record</b> is what the team itself made: research wins from their own (usually very early) entries. <b>If you copied their trades</b> is what you would have made in the last 7 days buying when they buy and selling when they sell. <b>From when you could get in, peak after</b> is the best case: from the market cap when we saw their buy to the highest point after it, so it shows whether there was room to take profit before the token died. <b>If you bought and held</b> is the same buys kept until now. A team can win big while copying it loses: they get in first and out first. Tap a team to see its wallets.</p>
+  ${Object.keys(D.card||{}).length?`<div class="card" style="margin-bottom:12px;padding:10px 12px"><b>Last 7 days, by chain</b> <span class="faint">proven teams' buys, from the market cap when you could have got in to the highest point after</span><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Chain</th><th class="n">Teams</th><th class="n">Buys</th><th class="n">1.5x+</th><th class="n">2x+</th><th class="n">5x+</th></tr></thead><tbody>${Object.entries(D.card).sort((a,b)=>cnt(b[1].n)-cnt(a[1].n)).map(([c,v])=>{const p=x=>cnt(v.n)?Math.round(cnt(x)/cnt(v.n)*100)+'%':'—';return`<tr><td>${esc(c)}</td><td class="n">${cnt(v.teams)}</td><td class="n">${cnt(v.n)}</td><td class="n">${p(v.x15)}</td><td class="n up">${p(v.x2)}</td><td class="n up">${p(v.x5)}</td></tr>`}).join('')}</tbody></table></div><div class="faint" style="font-size:12px;margin-top:4px">Best case: assumes you sold at the top. Fills up over 7 days from when this started (Nov 12).</div></div>`:''}
   <div class="card scroll"><table><thead><tr><th>Team</th><th>Grade</th><th>Their record vs. copying them</th><th>Last buy</th><th class="n hide-m">Buys 24h</th><th class="hide-m">Bought in 24h</th></tr></thead><tbody>
   ${rows.map(g=>{const a=act[g.id],n=cnt(g.n)||arr(g.wallets).length,L=cnt(g.legit);return`<tr><td><details data-id="${esc(g.id)}"><summary><b>${L?'★ ':''}${esc(g.nick||g.name||g.id)}</b> <span class="muted">· ${esc(g.style||g.kind||'')}</span><div class="chain">${esc(g.chain||'?')} · ${plural(n,'wallet')}${g.status?` · <span class="tag st-${esc(g.status)}">${esc(g.status)}</span>`:''}</div></summary>
     <div class="muted" style="margin-top:6px">${esc(g.about||'')}</div>${g.flag?`<div class="down" style="margin-top:4px;font-size:13px">⚠ ${esc(g.flag)}: ${esc(g.flag_reason||'')}. This team never triggers buy signals.</div>`:''}<div class="faint" style="font-size:12px;margin-top:4px">${cnt(g.winners)} wins / ${cnt(g.failed)} misses · Research id ${esc(g.id)} · ${esc(g.research_name||g.name||'')}</div>
@@ -410,9 +411,9 @@ function teamRecord(g,L){
   const line=(lab,x,tip)=>x&&cnt(x.n)?`<div title="${esc(tip)}"><span class="faint">${lab}</span> <b class="${num(x.med)>=0?'up':'down'}">${pct(num(x.med))}</b> <span class="faint">median · won ${Math.round(num(x.win)*100)}% of ${cnt(x.n)}</span></div>`:'';
   return`<div class="${v[0]}" style="font-weight:600;font-size:13px;margin-bottom:3px">${esc(v[1])}</div>
   <div style="font-size:12px"><span class="faint">Their record:</span> ${cnt(g.winners)} wins / ${cnt(g.failed)} misses${num(g.profit)>0?` · ${usd(g.profit)} profit`:''}${L?` · <span class="up">★ early on ${plural(L,'lasting token')}</span>`:''}</div>
-  ${best.length?`<div style="font-size:12px"><span class="faint">Best hits (3d, from their entry):</span> ${best.map(b=>`${esc(b.sym)} <b class="up">${num(b.x).toFixed(1)}x</b>`).join(', ')}</div>`:''}
+  ${best.length?`<div style="font-size:12px"><span class="faint">Best hits (7d, from when you could get in):</span> ${best.map(b=>`${esc(b.sym)} <b class="up">${num(b.x).toFixed(1)}x</b>`).join(', ')}</div>`:''}
   ${g.peak&&cnt(g.peak.n)?`<div style="font-size:12px;margin-top:2px" title="From the market cap when we saw each first buy (when you could have got in) to the highest market cap after it. Best case: it assumes you sold at the top."><span class="faint">From when you could get in, peak after:</span> <b class="${num(g.peak.med)>=0.5?'up':num(g.peak.med)>=0.2?'':'down'}">${pct(num(g.peak.med))}</b> <span class="faint">median · 2x+ on ${Math.round(num(g.peak.x2)*100)}% · 1.5x+ on ${Math.round(num(g.peak.x15)*100)}% of ${cnt(g.peak.n)}</span></div>`:''}
-  <div style="font-size:12px;margin-top:2px">${line('If you copied their trades:',c,'Buy when they buy, sell when they first sell (or hold if they still do). Last 3 days, at the market cap when each trade was seen.')}${line('If you bought and held:',f,'Buy when they buy and keep it until now. Last 3 days.')}</div>`;
+  <div style="font-size:12px;margin-top:2px">${line('If you copied their trades:',c,'Buy when they buy, sell when they first sell (or hold if they still do). Last 7 days, at the market cap when each trade was seen.')}${line('If you bought and held:',f,'Buy when they buy and keep it until now. Last 7 days.')}</div>`;
 }
 function vNew(){
   const all0=D.disc.filter(r=>inChain(r)&&match(r)),all=all0.filter(safeOK),nRisk=all0.length-all.length;
@@ -460,7 +461,7 @@ function vHow(){
   <p><b>★ Lasting-token pickers.</b> Teams marked ★ were early on tokens that held their value for weeks (like PRIORS on Robinhood) in our 80-day study, not just quick pumps. They count as proven and their buys count extra in Hot now.</p>
   <p><b>Token status.</b> <span class="tag up">Fresh</span> launched in the last 24h · <span class="tag up">Running</span> price up 10%+ in 1h or 25%+ in 6h · <span class="tag down">Fading</span> down 35%+ in 6h, 60%+ in 24h, or 60%+ below the highest market cap we saw · <span class="tag">Young</span> 1 to 3 days old, steady · <span class="tag faint">Older</span> everything else. Fading tokens and tokens older than 3 days are hidden by default.</p>
   <p><b>Buys only.</b> The page shows what teams are buying. Sells are left out because by the time a team sells, it is usually too late to act.</p>
-  <p><b>Hot now</b> ranks tokens by how many separate teams and wallets bought in the last 6 hours, and how much they spent. <b>Best last 3 days</b> compares market cap now with market cap at the first team buy. <b>Alerts</b> is the older, looser alert (any 2 wallets of a team or 2 teams, any size).</p>
+  <p><b>Hot now</b> ranks tokens by how many separate teams and wallets bought in the last 6 hours, and how much they spent. <b>Best last 7 days</b> compares market cap now with market cap at the first team buy. <b>Alerts</b> is the older, looser alert (any 2 wallets of a team or 2 teams, any size).</p>
   <p><b>Be careful.</b> When we tested copying these teams, most of the profit was gone by the time a copier could get in, and fees ate the rest. Teams also sell fast. Use this to find tokens worth a look, then do your own checks.</p>
   <p class="faint">Data: public blockchain nodes and GeckoTerminal, scanned every 6 to 7 minutes by a free GitHub Action. This page reloads the data every 2 minutes. Nothing here is financial advice.</p></div>`;
 }
