@@ -118,7 +118,7 @@ class Watch:
         cfg = S.EVM[chain]
         urls = cfg.get('wide') or cfg['rpcs']
         step = cfg.get('wide_range', 2000)
-        size = 16 if cfg.get('wide') else 60
+        size = 10 if cfg.get('wide') else 60
         rpc = S.RPC(chain + ' fast', urls, gap=0.2)
         head = int(rpc.call('eth_blockNumber', []), 16)
         last = self.evm_last.get(chain)

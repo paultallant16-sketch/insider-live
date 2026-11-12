@@ -368,9 +368,9 @@ def scan_evm_wide(chain, cfg, wallets, st, newmoves):
         e = min(head, b + step - 1)
         try:
             got = []
-            for i in range(0, len(tops), 16):           # public endpoints cap topics per filter
+            for i in range(0, len(tops), 10):           # public endpoints cap topics per filter
                 got += rpc.call('eth_getLogs', [{'fromBlock': hex(b), 'toBlock': hex(e),
-                                                 'topics': [TRANSFER, None, tops[i:i + 16]]}]) or []
+                                                 'topics': [TRANSFER, None, tops[i:i + 10]]}]) or []
             logs += got
             cur['wlast'] = e
             b = e + 1
@@ -1153,7 +1153,7 @@ def mine_trades(mine, tokens, watched):
     for chain, cas in by_chain.items():               # price + supply, to turn each trade into a market cap
         token_info(chain, cas, tokens)
     for key in young:
-        if left() < SCAN_RESERVE / 2:
+        if left() < 25:
             break
         chain, ca = key.split('|', 1)
         t = toks[key]
@@ -1377,6 +1377,21 @@ def main():
     k = st.get('pass_n', 0) % len(evm_order)                       # rotate so no chain is always last in line
     st['pass_n'] = st.get('pass_n', 0) + 1
     chains_order = ['Solana'] + evm_order[k:] + evm_order[:k]
+    # fresh launches first: the new / trending lists feed both discovery and team mining. Done before the chain
+    # scans so a slow pass can never skip them (it did, and mining silently collected nothing).
+    t_disc = time.time() + 45
+    for chain in ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']:
+        if time.time() > t_disc:
+            break
+        try:
+            discover(chain, disc, st)
+        except Exception as e:
+            ERRORS.append(f'discovery {chain}: {type(e).__name__}')
+    try:                                              # who bought those young tokens early ($50+)
+        auto = mine_trades(mine, tokens, {w for c in watch.values() for w in c})
+    except Exception as e:
+        auto = mine.get('teams', [])
+        ERRORS.append(f'mining: {type(e).__name__} {str(e)[:80]}')
     sol_deadline = time.time() + 0.40 * (left() - SCAN_RESERVE)    # Solana may not starve the EVM chains
     for chain in chains_order:
         if left() < SCAN_RESERVE + 20:
@@ -1758,13 +1773,6 @@ def main():
 
     # discovery: every token past $500K in the last 7 days, whether our teams bought it, at what market cap,
     # and whether a follower could still have made money after our scanner saw the buy
-    for chain in ['Solana', 'Robinhood', 'BSC', 'Base', 'Ethereum']:
-        if left() < 70:
-            break
-        try:
-            discover(chain, disc, st)
-        except Exception as e:
-            ERRORS.append(f'discovery {chain}: {type(e).__name__}')
     for m in moves:                                   # anything our teams bought that went past $500K
         if m['side'] == 'buy' and (m.get('mc') or 0) >= DISC_MIN_MC:
             disc.setdefault(f"{m['chain']}|{m['ca']}", dict(chain=m['chain'], ca=m['ca'], first_seen=NOW,
@@ -1881,8 +1889,6 @@ def main():
         ERRORS.append(f'KOLs: {type(e).__name__} {str(e)[:80]}')
         krows = []
     try:
-        watched = {w for c in watch.values() for w in c}
-        auto = mine_trades(mine, tokens, watched)
         save(os.path.join(DATA, 'mine.json'), mine)
         save(os.path.join(OUT, 'auto_teams.json'), dict(updated=NOW, tokens_tracked=len(mine.get('tok', {})),
                                                          wallets_scored=len(mine.get('w', {})), rows=auto))
