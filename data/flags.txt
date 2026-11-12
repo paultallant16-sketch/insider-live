@@ -57,6 +57,20 @@ ring|Ethereum|0x0e1c5ecbba12fa1cb187e3d18f1c0a58bce5ce3a|side|金狗挖掘机|so
 ring|Ethereum|0xb9e9098d699edd36a6b98fec617c3bf031ffa879|side|AntPositions(蚂蚁仓）☄️|sold within 5 min after the KOL buy with no buy in that window on 2 of this KOL's tokens (POLARIS,SEPPUKU); $332 sold; median delay 66 s; 2 tokens nev
 ring|Ethereum|0x162b12f30663447c53924136d8183f808f721b5b|side|Dani|sold within 5 min after the KOL buy with no buy in that window on 2 of this KOL's tokens (MIKAN,securepub); $606 sold; median delay 288 s; 2 tokens ne
 ring|Ethereum|0x7934546d5e96c119a51de75b7160f599a6fa9c8a|side|Yoda|sold within 5 min after the KOL buy with no buy in that window on 2 of this KOL's tokens (Seppuku); $226 sold; median delay 192 s; 2 tokens never boug
+ring|BSC|0x894960e0612145cd229b1d48978a554a9b2b5399|creator|未来 insiders|未来 creator: bought 79.5% at launch, still holds 25.9%, sent tokens to 105 wallets
+ring|BSC|0x349b4fe28e379ef4116f765a305a701bdeca0827|receiver|未来 insiders|未来: got 10% by transfer, dumped ~5% Nov 10 04:23
+ring|BSC|0x52a77b63501e0f25c43e4ba3e4f08c42427caeb4|receiver|未来 insiders|未来: got 1.4% by transfer
+ring|BSC|0x2d5707e0603c3b90570a3810b975d0c808ab2793|receiver|未来 insiders|未来: got 1.4% by transfer
+ring|BSC|0x842ac7f0fa016b2e551a5b870bbe6f8e85bc67f0|receiver|未来 insiders|未来: transfer receiver, slowly selling
+ring|BSC|0x20d35c9f0ec9178a90fdb6c328b230eedc49a003|receiver|未来 insiders|未来: 2% by transfer
+ring|BSC|0xaf62805f0f1b24a28a50fc106c77c281657f8bd7|deployer|Serial deployer|copycat factory: 26 flap clones of hot tokens, fake ATHs
+ring|BSC|0x208bca77d9a45c523544643c070e02de73c50338|deployer|Serial deployer|39 tokens with fake-holder spam (208K holders)
+ring|BSC|0x6365f0eb07a88496a32244d81b8ffda1ab730d59|deployer|Serial deployer|CORLA creator, 748 tokens
+ring|BSC|0x59c67584abb82317a8d8307b492c15ffdce0fdb3|deployer|Serial deployer|涨醒 creator, 493 tokens
+ring|BSC|0xfbca5fb6cab29ae598f6bdb91b49cdb38cd69076|deployer|Serial deployer|CPU creator, 437 tokens, instant pump-dumps
+ring|BSC|0x9230538d7fa674197692175ee01316607654035e|deployer|Serial deployer|咯咯 creator, 41 tokens
+ring|BSC|0x656aae498eed4d87e6038683bce99d7e9436ece5|deployer|Serial deployer|比特币 creator, 28 tokens
+ring|BSC|0xa1b3f08c14d8c6afa6c3cc82ad9d470dee3a1cad|deployer|Serial deployer|repeat X人生/自拉 launcher, 10 tokens
 ring|Robinhood|0x8c50b739c78922e1c25a92f0dd5ef5ca4c176364|side|阿峰_Afeng|held before KOL buy; sold 105 s (median) after it on 3 tokens; 0 no-buy sells; 0 sells in the 10 min before KOL buys; seen around 2 KOLs
 ring|Robinhood|0x5e972ac496e6875b2eb70e88d2d67793662ba029|side|金狗挖掘机|held before KOL buy; sold 9 s (median) after it on 3 tokens; all 3 sells with no on-chain buy (transfer-in); GMGN tags top_holder/rat_trader; only thi
 ring|Robinhood|0xbfdeb7652a8b49a91d44210b9c3da34ea940f352|side|Ed_x區塊日記🇭🇰|held before KOL buy; sold 30 s (median) after it on 4 tokens; all 4 sells with no on-chain buy (transfer-in); only this KOL
