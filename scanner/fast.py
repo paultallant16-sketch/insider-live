@@ -43,6 +43,7 @@ def load_targets():
     for gid, g in gmap.items():
         if gid in live:
             g['follow'] = live[gid].get('follow')
+            g['copy'] = live[gid].get('copy')
             if live[gid].get('flag'):                   # flagged live (dumps tokens it never bought)
                 good.discard(gid)
     tgt = {}
@@ -196,8 +197,8 @@ class Watch:
         names = []
         for g in teams[:3]:
             gg = self.gmap.get(g, {})
-            f = gg.get('follow') or {}
-            fs = f" (follow {f['med']:+.0%}/{f['n']})" if f.get('n') else ''
+            f = gg.get('copy') or {}
+            fs = f" (copying them {f['med']:+.0%} median over {f['n']})" if f.get('n') else ''
             names.append(f"{gg.get('nick') or gg.get('name') or g}{' *' if gg.get('legit') else ''}{fs}")
         mc, liq = info.get('mc') or 0, info.get('liq') or 0
         age = (S.NOW - created) / 3600 if created else None

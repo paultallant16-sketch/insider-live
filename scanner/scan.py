@@ -1440,21 +1440,44 @@ def main():
     # follower score: what copying each team would have done lately. The research grade measures who was early,
     # which also rewards wallets that dump on their followers; the backtest showed it does not predict this.
     mc_now = {f"{r['chain']}|{r['ca']}": r.get('mc_now') for r in hrows}
-    firsts, fol = {}, {}
+    firsts, sells, fol, cpy, hits = {}, {}, {}, {}, {}
     for m in sorted(moves, key=lambda m: m['ts']):
-        if m['side'] == 'buy' and (m.get('usd') or 0) >= 50 and m.get('mc') and 3600 <= NOW - m['ts'] <= 3 * 86400:
-            for g in m['groups']:
-                firsts.setdefault((g, m['chain'], m['ca']), m)
+        for g in m['groups']:
+            k = (g, m['chain'], m['ca'])
+            if m['side'] == 'buy' and (m.get('usd') or 0) >= 50 and m.get('mc') and NOW - m['ts'] <= 3 * 86400:
+                firsts.setdefault(k, m)
+            elif m['side'] == 'sell' and k in firsts and m.get('mc') and k not in sells:
+                sells[k] = m                         # the team's first sell after its first buy
     for (g, c, ca), m in firsts.items():
-        now_mc = mc_now.get(f'{c}|{ca}')
+        key = f'{c}|{ca}'
+        info = tokens.get(key) or {}
+        now_mc = mc_now.get(key) or info.get('mc')
+        top = max(info.get('peak') or 0, now_mc or 0)
+        if top:
+            hits.setdefault(g, []).append((round(top / m['mc'], 1), m['sym'], c, ca))
+        if NOW - m['ts'] < 3600:
+            continue                                 # too fresh to judge
         if now_mc:
             fol.setdefault(g, []).append(max(-1.0, min(now_mc / m['mc'] - 1, 10.0)))
-    follow = {g: dict(n=len(v), med=round(sorted(v)[len(v) // 2], 3), win=round(sum(x > 0 for x in v) / len(v), 2))
-              for g, v in fol.items()}
+        out_mc = sells[(g, c, ca)]['mc'] if (g, c, ca) in sells else now_mc
+        if out_mc:                                   # copy their trade: in when they buy, out when they first sell
+            cpy.setdefault(g, []).append(max(-1.0, min(out_mc / m['mc'] - 1, 10.0)))
+
+    def stat(v):
+        v = sorted(v)
+        return dict(n=len(v), med=round(v[len(v) // 2], 3), win=round(sum(x > 0 for x in v) / len(v), 2),
+                    mean=round(sum(v) / len(v), 3))
+    follow = {g: stat(v) for g, v in fol.items()}
+    copy = {g: stat(v) for g, v in cpy.items()}
     for r in out_groups:
         if r['id'] in follow:
             r['follow'] = follow[r['id']]
-    trusted = {g for g in good_ids if (follow.get(g) or {}).get('n', 0) >= 5 and follow[g]['med'] >= 0}
+        if r['id'] in copy:
+            r['copy'] = copy[r['id']]
+        if r['id'] in hits:
+            r['best'] = [dict(x=x, sym=sy, chain=c, ca=ca) for x, sy, c, ca in sorted(hits[r['id']], reverse=True)[:3]]
+    trusted = {g for g in good_ids if (copy.get(g) or {}).get('n', 0) >= 5 and copy[g]['med'] >= 0
+               and copy[g]['mean'] >= 0}             # copying their trades (in with them, out with them) paid
 
     # buy signals: proven teams putting real money into a fresh launch, not dust and not exits
     sigs = {f"{r['chain']}|{r['ca']}": r for r in load(os.path.join(OUT, 'signals.json'), {}).get('rows', [])}
