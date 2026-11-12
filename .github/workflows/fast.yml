@@ -1,0 +1,26 @@
+name: fast
+on:
+  schedule:
+    - cron: '10,40 * * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: fast
+  cancel-in-progress: false
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Watch proven team wallets every ~20 seconds and alert on buys (about 5.5 hours per job)
+        env:
+          NTFY_TOPIC: 'insider-live-49ab55a62a52'
+          FAST_SECONDS: '19500'
+          FAST_MIN_USD: '150'
+          FAST_CYCLE: '20'
+        run: python scanner/fast.py
