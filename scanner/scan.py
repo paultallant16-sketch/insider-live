@@ -1103,7 +1103,7 @@ def risk_tokens(moves, gmap, tokens):
         k = f"{m['chain']}|{m['ca']}"
         ring = [gmap[g]['name'] for g in m['groups'] if g in gmap and gmap[g].get('kind') == 'ring']
         if ring and NOW - m['ts'] < 86400:
-            why = f'KOL dump ring active ({ring[0]})'
+            why = f'dump-ring / insider wallets active ({ring[0]})'
             if why not in RISK_TOK.setdefault(k, []):
                 RISK_TOK[k].append(why)
         key = (m['wallet'], k)
@@ -1232,7 +1232,10 @@ def main():
                 scan_blockscout(chain, [w.lower() for w in watch.get(chain, {})], st, newmoves)
             elif chain in ('BSC', 'Base'):
                 try:
-                    wide = sorted(w.lower() for w in proven.get(chain, ()))[:64]   # best teams only: these calls are slow
+                    gb = {g['id']: g['winners'] + 5 * (g.get('legit') or 0) for g in groups if g['id'] in good_ids}
+                    pw = watch.get(chain, {})
+                    wide = sorted(proven.get(chain, ()), key=lambda w: -max(gb.get(x, 0) for x in pw[w]))
+                    wide = [w.lower() for w in wide][:64]       # best teams only: these calls are slow
                     scan_evm_wide(chain, EVM[chain], wide, st, newmoves)
                 except Exception as e:
                     ERRORS.append(f'{chain} wide: {type(e).__name__} {str(e)[:80]}')
