@@ -309,8 +309,8 @@ def scan_evm(chain, cfg, wallets, st, newmoves, contracts=None):
     rng = cur.get('range', cfg['max_range'])
     logs = []
     b = start
-    t_end = time.time() + min(100, max(20, (left() - SCAN_RESERVE) / 3))   # per-chain cap
-    while b <= head and left() > SCAN_RESERVE and time.time() < t_end:
+    t_end = min(time.time() + 100, SLICE[0])                               # this chain's share of the pass
+    while b <= head and left() > SCAN_RESERVE / 2 and time.time() < t_end:
         e = min(head, b + rng - 1)
         try:
             got = []
@@ -363,8 +363,8 @@ def scan_evm_wide(chain, cfg, wallets, st, newmoves):
     step = cfg.get('wide_range', 50)
     logs, fails = [], 0
     b = start
-    t_end = time.time() + min(55, max(30, (left() - SCAN_RESERVE) / 4))   # leave time for the other chains
-    while b <= head and left() > SCAN_RESERVE and time.time() < t_end and fails < 4:
+    t_end = time.time() + max(12, 0.45 * (SLICE[0] - time.time()))        # wide scan: under half the chain's share
+    while b <= head and left() > SCAN_RESERVE / 2 and time.time() < t_end and fails < 4:
         e = min(head, b + step - 1)
         try:
             got = []
@@ -440,9 +440,9 @@ def scan_blockscout(chain, wallets, st, newmoves):
     last = cur.setdefault('last', {})
     wset = set(wallets)
     done = fails = 0
-    t_end = time.time() + min(100, max(20, (left() - SCAN_RESERVE) / 2))
+    t_end = min(time.time() + 100, SLICE[0])
     for w in sorted(wallets):
-        if left() < SCAN_RESERVE or time.time() > t_end or fails >= 5:
+        if left() < SCAN_RESERVE / 2 or time.time() > t_end or fails >= 5:
             break
         try:
             try:
@@ -657,6 +657,7 @@ DISC_MIN_MC = 500_000
 DISC_MAX_AGE = 7 * 86400
 
 
+SLICE = [0.0]           # end time of the current chain's share of the pass
 FRESH = []              # (chain, ca, pool, created, mc) seen this pass on GeckoTerminal's new / trending lists
 
 
@@ -1385,11 +1386,13 @@ def main():
             discover(chain, disc, st)
         except Exception as e:
             ERRORS.append(f'discovery {chain}: {type(e).__name__}')
-    sol_deadline = time.time() + 0.40 * (left() - SCAN_RESERVE)    # Solana may not starve the EVM chains
-    for chain in chains_order:
-        if left() < SCAN_RESERVE + 20:
+    sol_deadline = time.time() + 0.30 * max(60, left() - SCAN_RESERVE)   # Solana may not starve the EVM chains
+    for i, chain in enumerate(chains_order):
+        if left() < SCAN_RESERVE / 2:
             ERRORS.append(f'{chain}: skipped this pass (time budget)')
             continue
+        # every chain left in this pass gets an equal share of the time that remains (at least 20 s)
+        SLICE[0] = time.time() + max(20, (left() - SCAN_RESERVE) / max(1, len(chains_order) - i))
         try:
             if chain == 'Solana':
                 scan_solana(list(watch.get('Solana', {})), st, newmoves, priority=proven.get('Solana', ()),
