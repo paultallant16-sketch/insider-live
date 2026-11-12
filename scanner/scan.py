@@ -363,7 +363,7 @@ def scan_evm_wide(chain, cfg, wallets, st, newmoves):
     step = cfg.get('wide_range', 50)
     logs, fails = [], 0
     b = start
-    t_end = time.time() + min(45, max(15, (left() - SCAN_RESERVE) / 5))   # leave time for the other chains
+    t_end = time.time() + min(55, max(30, (left() - SCAN_RESERVE) / 4))   # leave time for the other chains
     while b <= head and left() > SCAN_RESERVE and time.time() < t_end and fails < 4:
         e = min(head, b + step - 1)
         try:
@@ -1235,7 +1235,7 @@ def main():
                     gb = {g['id']: g['winners'] + 5 * (g.get('legit') or 0) for g in groups if g['id'] in good_ids}
                     pw = watch.get(chain, {})
                     wide = sorted(proven.get(chain, ()), key=lambda w: -max(gb.get(x, 0) for x in pw[w]))
-                    wide = [w.lower() for w in wide][:64]       # best teams only: these calls are slow
+                    wide = [w.lower() for w in wide][:48]       # best teams only: these calls are slow
                     scan_evm_wide(chain, EVM[chain], wide, st, newmoves)
                 except Exception as e:
                     ERRORS.append(f'{chain} wide: {type(e).__name__} {str(e)[:80]}')
