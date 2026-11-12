@@ -1545,8 +1545,8 @@ def main():
             a['peak_mc'] = max(a.get('peak_mc') or 0, info['mc'])
     alerts.sort(key=lambda a: -a.get('updated', 0))
 
-    # hot board: every token our teams bought in the last 3 days, and how it has done since the first team buy
-    since3 = NOW - 3 * 86400
+    # hot board: every token our teams bought in the last 7 days, and how it has done since the first team buy
+    since3 = NOW - 7 * 86400
     hot = {}
     for m in sorted(moves, key=lambda m: m['ts']):
         if m['side'] == 'internal' or m['ts'] < since3:
@@ -1573,7 +1573,7 @@ def main():
             h['sell_usd'] += m.get('usd') or 0
     hot = {k: h for k, h in hot.items() if h['first_buy']}
     for chain in GT_NET:
-        cas = [h['ca'] for h in sorted(hot.values(), key=lambda h: -h['last']) if h['chain'] == chain][:90]
+        cas = [h['ca'] for h in sorted(hot.values(), key=lambda h: -h['last']) if h['chain'] == chain][:150]
         if cas and left() > 50:
             token_info(chain, cas, tokens)
     hrows = []
@@ -1598,52 +1598,46 @@ def main():
     # follower score: what copying each team would have done lately. The research grade measures who was early,
     # which also rewards wallets that dump on their followers; the backtest showed it does not predict this.
     mc_now = {f"{r['chain']}|{r['ca']}": r.get('mc_now') for r in hrows}
-    firsts, sells, fol, cpy, hits = {}, {}, {}, {}, {}
-    for m in sorted(moves, key=lambda m: m['ts']):
-        for g in m['groups']:
-            k = (g, m['chain'], m['ca'])
-            if m['side'] == 'buy' and (m.get('usd') or 0) >= 50 and m.get('mc') and NOW - m['ts'] <= 3 * 86400:
-                firsts.setdefault(k, m)
-            elif m['side'] == 'sell' and k in firsts and m.get('mc') and k not in sells:
-                sells[k] = m                         # the team's first sell after its first buy
-    for (g, c, ca), m in firsts.items():
-        key = f'{c}|{ca}'
-        info = tokens.get(key) or {}
-        now_mc = mc_now.get(key) or info.get('mc')
-        top = max(info.get('peak') or 0, now_mc or 0)
-        if top:
-            hits.setdefault(g, []).append((round(top / m['mc'], 1), m['sym'], c, ca))
-        if NOW - m['ts'] < 3600:
-            continue                                 # too fresh to judge
-        if now_mc:
-            fol.setdefault(g, []).append(max(-1.0, min(now_mc / m['mc'] - 1, 10.0)))
-        out_mc = sells[(g, c, ca)]['mc'] if (g, c, ca) in sells else now_mc
-        if out_mc:                                   # copy their trade: in when they buy, out when they first sell
-            cpy.setdefault(g, []).append(max(-1.0, min(out_mc / m['mc'] - 1, 10.0)))
-
-    # room to take profit: from the market cap when we saw each first buy (when a follower could get in) to the
-    # highest market cap seen after it. Kept per team+token across passes, since most tokens peak and die.
+    # 7-day ledger of every team's first buy per token (moves.json only holds ~3 days, so it is kept in state):
+    # [entry mc when we saw it, buy ts, highest mc after, sym, mc at the team's first sell, latest mc, chain]
     pk = st.setdefault('pk', {})
+    for kk in [k for k, v in pk.items() if len(v) < 7]:
+        pk.pop(kk)                                   # old format
     seen_mc = {}
     for m in moves:
         if m.get('mc'):
             seen_mc.setdefault(f"{m['chain']}|{m['ca']}", []).append((m['ts'], m['mc']))
-    for (g, c, ca), m in firsts.items():
-        key = f'{c}|{ca}'
-        kk = f'{g}|{key}'
-        row = pk.get(kk)
-        if not row or row[1] != m['ts']:
-            row = pk[kk] = [m['mc'], m['ts'], m['mc'], m['sym']]
-        now_mc = mc_now.get(key) or (tokens.get(key) or {}).get('mc')
-        later = [x for t, x in seen_mc.get(key, []) if t >= m['ts']]
-        row[2] = max([row[2], now_mc or 0] + later)
-    pk_by = {}
-    for kk, (e, ts, top, sym) in list(pk.items()):
-        if NOW - ts > 3 * 86400:
+    for m in sorted(moves, key=lambda m: m['ts']):
+        key = f"{m['chain']}|{m['ca']}"
+        for g in m['groups']:
+            kk = f'{g}|{key}'
+            if m['side'] == 'buy' and (m.get('usd') or 0) >= 50 and m.get('mc') and kk not in pk \
+                    and NOW - m['ts'] <= 7 * 86400:
+                pk[kk] = [m['mc'], m['ts'], m['mc'], m['sym'], None, m['mc'], m['chain']]
+            elif m['side'] == 'sell' and kk in pk and pk[kk][4] is None and m['ts'] >= pk[kk][1] and m.get('mc'):
+                pk[kk][4] = m['mc']                  # the team's first sell after its first buy
+    hits, fol, cpy, pk_by = {}, {}, {}, {}
+    for kk, row in list(pk.items()):
+        e, ts, top, sym, out, last, chain = row
+        if NOW - ts > 7 * 86400:
             pk.pop(kk)
             continue
-        if NOW - ts >= 1800 and e:
-            pk_by.setdefault(kk.split('|')[0], []).append(top / e - 1)
+        g, key = kk.split('|', 1)
+        ca = key.split('|', 1)[1]
+        now_mc = mc_now.get(key) or ((tokens.get(key) or {}).get('mc') if (tokens.get(key) or {}).get('at') == NOW else None)
+        if now_mc:
+            row[5] = now_mc
+        later = [x for t, x in seen_mc.get(key, []) if t >= ts]
+        row[2] = max([row[2], row[5] or 0] + later)
+        if not e:
+            continue
+        hits.setdefault(g, []).append((round(row[2] / e, 1), sym, chain, ca))
+        if NOW - ts < 1800:
+            continue                                 # too fresh to judge
+        pk_by.setdefault(g, []).append(row[2] / e - 1)
+        if NOW - ts >= 3600 and row[5]:
+            fol.setdefault(g, []).append(max(-1.0, min(row[5] / e - 1, 10.0)))
+            cpy.setdefault(g, []).append(max(-1.0, min((row[4] or row[5]) / e - 1, 10.0)))
 
     def stat(v):
         v = sorted(v)
@@ -1662,6 +1656,18 @@ def main():
             r['peak'] = peak[r['id']]
         if r['id'] in hits:
             r['best'] = [dict(x=x, sym=sy, chain=c, ca=ca) for x, sy, c, ca in sorted(hits[r['id']], reverse=True)[:3]]
+    # per-chain scorecard for the page: proven teams' buys in the last 7 days, from when a follower could get in
+    card = {}
+    for kk, (e, ts, top, sym, out, last, chain) in pk.items():
+        if not e or NOW - ts < 1800 or kk.split('|', 1)[0] not in good_ids:
+            continue
+        c = card.setdefault(chain, dict(n=0, x15=0, x2=0, x5=0, teams=set()))
+        c['n'] += 1
+        c['x15'] += top / e >= 1.5
+        c['x2'] += top / e >= 2
+        c['x5'] += top / e >= 5
+        c['teams'].add(kk.split('|', 1)[0])
+    scorecard = {c: dict(n=v['n'], x15=v['x15'], x2=v['x2'], x5=v['x5'], teams=len(v['teams'])) for c, v in card.items()}
     trusted = {g for g in good_ids                   # after we could get in, their tokens kept running often enough
                if ((peak.get(g) or {}).get('n', 0) >= 5 and (peak[g]['x2'] >= 0.25 or peak[g]['med'] >= 0.5))
                or ((copy.get(g) or {}).get('n', 0) >= 5 and copy[g]['med'] >= 0 and copy[g]['mean'] >= 0)}
@@ -1867,6 +1873,7 @@ def main():
     save(os.path.join(OUT, 'alerts.json'), dict(updated=NOW, rows=alerts[:500]))
     save(os.path.join(OUT, 'hot.json'), dict(updated=NOW, rows=hrows[:800]))
     save(os.path.join(OUT, 'signals.json'), dict(updated=NOW, rows=srows[:400]))
+    save(os.path.join(OUT, 'scorecard.json'), dict(updated=NOW, days=7, chains=scorecard))
     try:
         kol_followups(kmoves, tokens)
         krows = kol_rows(groups, kmoves, tokens, st.get('safe') or {})
