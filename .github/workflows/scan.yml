@@ -19,7 +19,7 @@ jobs:
           python-version: '3.12'
       - name: Scan all chains on a loop (about 5.5 hours per job)
         env:
-          RUN_BUDGET: '400'
+          RUN_BUDGET: '520'
           NTFY_TOPIC: 'insider-live-49ab55a62a52'
         run: |
           git config user.name  "insider-live-bot"
